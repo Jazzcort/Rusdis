@@ -18,14 +18,15 @@ fn main() {
                 let mut req = String::new();
                 if let Ok(_) = stream.read_to_string(&mut req) {
                     let a: Vec<&str> = req.split("\r\n").collect();
-                    match a[2] {
-                        "PING" | "ping" => {
+                    match a[2].to_lowercase().as_str() {
+                        // "ping" => {
+                        //     let response = String::from("+PONG\r\n");
+                        //     stream.write(response.as_bytes()).unwrap();
+
+                        // }
+                        _ => {
                             let response = String::from("+PONG\r\n");
                             stream.write(response.as_bytes()).unwrap();
-                            
-                        }
-                        _ => {
-                            
                         }
                     }
                 }

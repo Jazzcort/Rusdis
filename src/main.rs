@@ -57,6 +57,7 @@ async fn handle_commands(mut stream: TcpStream) -> Result<(), std::io::Error> {
     reader.consume(buf.len());
 
     let commands = String::from_utf8_lossy(&buf);
+    println!("{}", commands);
     let commands = commands.split("\n");
 
     for command in commands {

@@ -57,6 +57,9 @@ async fn handle_commands(mut stream: TcpStream) -> Result<(), std::io::Error> {
     reader.consume(buf.len());
 
     let commands = String::from_utf8_lossy(&buf);
+    if commands == "*1\r\n$4\r\nPING\r\n" {
+        writer.write_all(b"+PONG\r\n").await?;
+    }
     println!("{}", commands);
     let commands = commands.split("\n");
 

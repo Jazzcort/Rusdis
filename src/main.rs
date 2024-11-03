@@ -51,7 +51,7 @@ async fn main() {
 }
 
 async fn handle_commands(mut stream: TcpStream) -> Result<(), std::io::Error> {
-    let (reader, writer) = stream.split();
+    let (reader, mut writer) = stream.split();
     let mut reader = BufReader::new(reader);
     let mut buf = Vec::from(reader.fill_buf().await?);
     reader.consume(buf.len());
@@ -62,7 +62,7 @@ async fn handle_commands(mut stream: TcpStream) -> Result<(), std::io::Error> {
     for command in commands {
         match command {
             "ping" | "PING" => {
-                stream.write_all(b"+PONG\r\n").await?;
+                writer.write_all(b"+PONG\r\n").await?;
             }
             _ => {}
         }

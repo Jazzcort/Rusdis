@@ -53,24 +53,30 @@ async fn main() {
 async fn handle_commands(mut stream: TcpStream) -> Result<(), std::io::Error> {
     let (reader, mut writer) = stream.split();
     let mut reader = BufReader::new(reader);
-    let mut buf = Vec::from(reader.fill_buf().await?);
-    reader.consume(buf.len());
 
-    let commands = String::from_utf8_lossy(&buf);
-    if commands == "*1\r\n$4\r\nPING\r\n" {
-        writer.write_all(b"+PONG\r\n").await?;
-    }
-    println!("{}", commands);
-    let commands = commands.split("\n");
-
-    for command in commands {
-        match command {
-            "ping" | "PING" => {
-                writer.write_all(b"+PONG\r\n").await?;
-            }
-            _ => {}
+    loop {
+        let mut buf = Vec::from(reader.fill_buf().await?);
+        if buf.len() == 0 {
+            break;
         }
+        reader.consume(buf.len());
+        let commands = String::from_utf8_lossy(&buf);
+        if commands == "*1\r\n$4\r\nPING\r\n" {
+            writer.write_all(b"+PONG\r\n").await?;
+        }
+        println!("{}", commands);
     }
+
+    //let commands = commands.split("\n");
+
+    //for command in commands {
+    //    match command {
+    //        "ping" | "PING" => {
+    //            writer.write_all(b"+PONG\r\n").await?;
+    //        }
+    //        _ => {}
+    //    }
+    //}
 
     Ok(())
 }

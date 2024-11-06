@@ -1,7 +1,18 @@
-// Uncomment this block to pass the first stage
+mod parser;
+
+use crate::parser::{parse, ParserError, Value};
+use lazy_static::lazy_static;
+use regex::Regex;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::tcp::WriteHalf;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::task;
+
+//lazy_static! {
+//    static ref START_WITH_SPECIAL: Regex = Regex::new(r#"^([\+-:$\*_#,=\(!%`>~])"#).unwrap();
+//    static ref ARRAY_STRUCT: Regex = Regex::new(r#"^*"#).unwrap();
+//    static ref BULK_STRING_STRUCT: Regex = Regex::new(r#"^$"#).unwrap();
+//}
 
 #[tokio::main]
 async fn main() {
@@ -50,7 +61,7 @@ async fn main() {
     //}
 }
 
-async fn handle_commands(mut stream: TcpStream) -> Result<(), std::io::Error> {
+async fn handle_commands(mut stream: TcpStream) -> Result<(), ParserError> {
     let (reader, mut writer) = stream.split();
     let mut reader = BufReader::new(reader);
 
@@ -60,11 +71,15 @@ async fn handle_commands(mut stream: TcpStream) -> Result<(), std::io::Error> {
             break;
         }
         reader.consume(buf.len());
-        let commands = String::from_utf8_lossy(&buf);
-        if commands == "*1\r\n$4\r\nPING\r\n" {
-            writer.write_all(b"+PONG\r\n").await?;
-        }
+        let commands = String::from_utf8_lossy(&buf).to_string();
         println!("{}", commands);
+        let value = parse(commands)?;
+
+        execute_commands(value, &mut writer).await?;
+
+        //if commands == "*1\r\n$4\r\nPING\r\n" {
+        //    writer.write_all(b"+PONG\r\n").await?;
+        //}
     }
 
     //let commands = commands.split("\n");
@@ -77,6 +92,57 @@ async fn handle_commands(mut stream: TcpStream) -> Result<(), std::io::Error> {
     //        _ => {}
     //    }
     //}
+
+    Ok(())
+}
+
+async fn execute_commands(command: Value, writer: &mut WriteHalf<'_>) -> Result<(), ParserError> {
+    dbg!(&command);
+    match command {
+        Value::Array(values_vec) => {
+            for v in values_vec.into_iter() {
+                dbg!(&v);
+                Box::pin(execute_commands(v, writer)).await?;
+            }
+        }
+        Value::BulkString(s) => {
+            let s_idx = s.find(" ");
+            let mut c = s.to_uppercase();
+            let mut data = String::new();
+            if s_idx.is_some() {
+                let (lhs, rhs) = s.split_at(s_idx.unwrap());
+                c = lhs.to_uppercase();
+                data = rhs[1..].to_string();
+            }
+            dbg!(&c);
+
+            match c.as_str() {
+                "ECHO" => {
+                    let length = data.len();
+                    dbg!(&data);
+                    writer
+                        .write_all(format!("${}\r\n{}\r\n", length, data).as_bytes())
+                        .await?;
+                }
+                "PING" => {
+                    writer.write_all(b"+PONG\r\n").await?;
+                }
+                _ => {}
+            }
+        }
+        Value::SimpleString(s) => {
+            let upper_s = s.to_uppercase();
+            dbg!(&upper_s);
+
+            match upper_s.as_str() {
+                "PING" => {
+                    writer.write_all(b"+PONG\r\n").await?;
+                }
+                _ => {}
+            }
+        }
+        _ => {}
+    }
 
     Ok(())
 }

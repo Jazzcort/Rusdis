@@ -1,5 +1,7 @@
+mod error;
 mod parser;
 
+use crate::error::RusdisError;
 use crate::parser::{parse, ParserError, Value};
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -61,7 +63,7 @@ async fn main() {
     //}
 }
 
-async fn handle_commands(mut stream: TcpStream) -> Result<(), ParserError> {
+async fn handle_commands(mut stream: TcpStream) -> Result<(), RusdisError> {
     let (reader, mut writer) = stream.split();
     let mut reader = BufReader::new(reader);
 
@@ -75,7 +77,12 @@ async fn handle_commands(mut stream: TcpStream) -> Result<(), ParserError> {
         println!("{}", commands);
         let value = parse(commands)?;
 
-        execute_commands(value, &mut writer).await?;
+        match value {
+            Value::Array(cmds) => {
+                execute_commands(cmds, &mut writer).await?;
+            }
+            _ => {}
+        }
 
         //if commands == "*1\r\n$4\r\nPING\r\n" {
         //    writer.write_all(b"+PONG\r\n").await?;
@@ -96,45 +103,29 @@ async fn handle_commands(mut stream: TcpStream) -> Result<(), ParserError> {
     Ok(())
 }
 
-async fn execute_commands(command: Value, writer: &mut WriteHalf<'_>) -> Result<(), ParserError> {
+async fn execute_commands(
+    command: Vec<Value>,
+    writer: &mut WriteHalf<'_>,
+) -> Result<(), RusdisError> {
     dbg!(&command);
-    match command {
-        Value::Array(values_vec) => {
-            for v in values_vec.into_iter() {
-                dbg!(&v);
-                Box::pin(execute_commands(v, writer)).await?;
-            }
-        }
-        Value::BulkString(s) => {
-            let s_idx = s.find(" ");
-            let mut c = s.to_uppercase();
-            let mut data = String::new();
-            if s_idx.is_some() {
-                let (lhs, rhs) = s.split_at(s_idx.unwrap());
-                c = lhs.to_uppercase();
-                data = rhs[1..].to_string();
-            }
-            dbg!(&c);
 
-            match c.as_str() {
+    match &command[0] {
+        Value::BulkString(cmd) => {
+            let cmd = cmd.to_uppercase();
+            match cmd.as_str() {
                 "ECHO" => {
-                    let length = data.len();
-                    dbg!(&data);
-                    writer
-                        .write_all(format!("${}\r\n{}\r\n", length, data).as_bytes())
-                        .await?;
-                }
-                "PING" => {
-                    writer.write_all(b"+PONG\r\n").await?;
-                }
-                _ => {}
-            }
-        }
-        Value::SimpleString(s) => {
-            let upper_s = s.to_uppercase();
-            dbg!(&upper_s);
+                    if command.len() < 2 {
+                        return Err(RusdisError::InvalidCommand);
+                    }
 
-            match upper_s.as_str() {
+                    if let Value::BulkString(word) = &command[1] {
+                        writer
+                            .write_all(format!("+{}\r\n", word).as_bytes())
+                            .await?;
+                    } else {
+                        return Err(RusdisError::InvalidCommand);
+                    }
+                }
                 "PING" => {
                     writer.write_all(b"+PONG\r\n").await?;
                 }
@@ -143,6 +134,51 @@ async fn execute_commands(command: Value, writer: &mut WriteHalf<'_>) -> Result<
         }
         _ => {}
     }
+    //match command {
+    //    Value::Array(values_vec) => {
+    //        for v in values_vec.into_iter() {
+    //            dbg!(&v);
+    //            Box::pin(execute_commands(v, writer)).await?;
+    //        }
+    //    }
+    //    Value::BulkString(s) => {
+    //        let s_idx = s.find(" ");
+    //        let mut c = s.to_uppercase();
+    //        let mut data = String::new();
+    //        if s_idx.is_some() {
+    //            let (lhs, rhs) = s.split_at(s_idx.unwrap());
+    //            c = lhs.to_uppercase();
+    //            data = rhs[1..].to_string();
+    //        }
+    //        dbg!(&c);
+    //
+    //        match c.as_str() {
+    //            "ECHO" => {
+    //                let length = data.len();
+    //                dbg!(&data);
+    //                writer
+    //                    .write_all(format!("${}\r\n{}\r\n", length, data).as_bytes())
+    //                    .await?;
+    //            }
+    //            "PING" => {
+    //                writer.write_all(b"+PONG\r\n").await?;
+    //            }
+    //            _ => {}
+    //        }
+    //    }
+    //    Value::SimpleString(s) => {
+    //        let upper_s = s.to_uppercase();
+    //        dbg!(&upper_s);
+    //
+    //        match upper_s.as_str() {
+    //            "PING" => {
+    //                writer.write_all(b"+PONG\r\n").await?;
+    //            }
+    //            _ => {}
+    //        }
+    //    }
+    //    _ => {}
+    //}
 
     Ok(())
 }

@@ -6,6 +6,6 @@ pub enum RusdisError {
     ParserError(#[from] crate::ParserError),
     #[error("Invalid Command")]
     InvalidCommand,
-    #[error("IO errors")]
+    #[error("IO error")]
     IO(#[from] std::io::Error),
 }

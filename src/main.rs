@@ -5,16 +5,20 @@ use crate::error::RusdisError;
 use crate::parser::{parse, ParserError, Value};
 use lazy_static::lazy_static;
 use regex::Regex;
+use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::tcp::WriteHalf;
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::Mutex;
 use tokio::task;
 
-//lazy_static! {
-//    static ref START_WITH_SPECIAL: Regex = Regex::new(r#"^([\+-:$\*_#,=\(!%`>~])"#).unwrap();
-//    static ref ARRAY_STRUCT: Regex = Regex::new(r#"^*"#).unwrap();
-//    static ref BULK_STRING_STRUCT: Regex = Regex::new(r#"^$"#).unwrap();
-//}
+lazy_static! {
+    //static ref START_WITH_SPECIAL: Regex = Regex::new(r#"^([\+-:$\*_#,=\(!%`>~])"#).unwrap();
+    //static ref ARRAY_STRUCT: Regex = Regex::new(r#"^*"#).unwrap();
+    //static ref BULK_STRING_STRUCT: Regex = Regex::new(r#"^$"#).unwrap();
+    static ref DATABASE: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
+}
 
 #[tokio::main]
 async fn main() {
@@ -83,23 +87,7 @@ async fn handle_commands(mut stream: TcpStream) -> Result<(), RusdisError> {
             }
             _ => {}
         }
-
-        //if commands == "*1\r\n$4\r\nPING\r\n" {
-        //    writer.write_all(b"+PONG\r\n").await?;
-        //}
     }
-
-    //let commands = commands.split("\n");
-
-    //for command in commands {
-    //    match command {
-    //        "ping" | "PING" => {
-    //            writer.write_all(b"+PONG\r\n").await?;
-    //        }
-    //        _ => {}
-    //    }
-    //}
-
     Ok(())
 }
 
@@ -129,56 +117,47 @@ async fn execute_commands(
                 "PING" => {
                     writer.write_all(b"+PONG\r\n").await?;
                 }
+                "SET" => {
+                    if command.len() < 3 {
+                        return Err(RusdisError::InvalidCommand);
+                    }
+
+                    let (key, value) = (&command[1], &command[2]);
+
+                    match (key, value) {
+                        (Value::BulkString(k), Value::BulkString(v)) => {
+                            let mut data_handle = DATABASE.lock().await;
+                            let _ = data_handle.insert(k.to_string(), v.to_string());
+                            writer.write_all(b"+OK\r\n").await?;
+                        }
+                        _ => return Err(RusdisError::InvalidCommand),
+                    }
+                }
+                "GET" => {
+                    if command.len() < 2 {
+                        return Err(RusdisError::InvalidCommand);
+                    }
+
+                    if let Value::BulkString(key) = &command[1] {
+                        let data_handle = DATABASE.lock().await;
+                        match data_handle.get(key) {
+                            Some(val) => {
+                                writer
+                                    .write_all(format!("${}\r\n{}\r\n", val.len(), val).as_bytes())
+                                    .await?;
+                            }
+                            None => {
+                                writer.write_all(b"$-1\r\n").await?;
+                            }
+                        }
+                    } else {
+                        return Err(RusdisError::InvalidCommand);
+                    }
+                }
                 _ => {}
             }
         }
         _ => {}
     }
-    //match command {
-    //    Value::Array(values_vec) => {
-    //        for v in values_vec.into_iter() {
-    //            dbg!(&v);
-    //            Box::pin(execute_commands(v, writer)).await?;
-    //        }
-    //    }
-    //    Value::BulkString(s) => {
-    //        let s_idx = s.find(" ");
-    //        let mut c = s.to_uppercase();
-    //        let mut data = String::new();
-    //        if s_idx.is_some() {
-    //            let (lhs, rhs) = s.split_at(s_idx.unwrap());
-    //            c = lhs.to_uppercase();
-    //            data = rhs[1..].to_string();
-    //        }
-    //        dbg!(&c);
-    //
-    //        match c.as_str() {
-    //            "ECHO" => {
-    //                let length = data.len();
-    //                dbg!(&data);
-    //                writer
-    //                    .write_all(format!("${}\r\n{}\r\n", length, data).as_bytes())
-    //                    .await?;
-    //            }
-    //            "PING" => {
-    //                writer.write_all(b"+PONG\r\n").await?;
-    //            }
-    //            _ => {}
-    //        }
-    //    }
-    //    Value::SimpleString(s) => {
-    //        let upper_s = s.to_uppercase();
-    //        dbg!(&upper_s);
-    //
-    //        match upper_s.as_str() {
-    //            "PING" => {
-    //                writer.write_all(b"+PONG\r\n").await?;
-    //            }
-    //            _ => {}
-    //        }
-    //    }
-    //    _ => {}
-    //}
-
     Ok(())
 }

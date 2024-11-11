@@ -1,12 +1,17 @@
+mod command_parser;
+mod data;
 mod error;
 mod parser;
 
+use crate::command_parser::{parse_command, Command};
+use crate::data::Data;
 use crate::error::RusdisError;
 use crate::parser::{parse, ParserError, Value};
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::tcp::WriteHalf;
 use tokio::net::{TcpListener, TcpStream};
@@ -17,7 +22,7 @@ lazy_static! {
     //static ref START_WITH_SPECIAL: Regex = Regex::new(r#"^([\+-:$\*_#,=\(!%`>~])"#).unwrap();
     //static ref ARRAY_STRUCT: Regex = Regex::new(r#"^*"#).unwrap();
     //static ref BULK_STRING_STRUCT: Regex = Regex::new(r#"^$"#).unwrap();
-    static ref DATABASE: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
+    static ref DATABASE: Arc<Mutex<HashMap<String, Data>>> = Arc::new(Mutex::new(HashMap::new()));
 }
 
 #[tokio::main]
@@ -45,26 +50,6 @@ async fn main() {
             }
         }
     }
-    //for res in listener.accept().await {
-    //    match res {
-    //        Ok((mut stream, _)) => {
-    //            println!("accepted new connection");
-    //
-    //            let mut buf = [0; 512];
-    //            loop {
-    //                let read_count = stream.read(&mut buf).unwrap();
-    //                if read_count == 0 {
-    //                    break;
-    //                }
-    //
-    //                stream.write(b"+PONG\r\n").unwrap();
-    //            }
-    //        }
-    //        Err(e) => {
-    //            println!("error: {}", e);
-    //        }
-    //    }
-    //}
 }
 
 async fn handle_commands(mut stream: TcpStream) -> Result<(), RusdisError> {
@@ -96,68 +81,119 @@ async fn execute_commands(
     writer: &mut WriteHalf<'_>,
 ) -> Result<(), RusdisError> {
     dbg!(&command);
+    let command = parse_command(command)?;
 
-    match &command[0] {
-        Value::BulkString(cmd) => {
-            let cmd = cmd.to_uppercase();
-            match cmd.as_str() {
-                "ECHO" => {
-                    if command.len() < 2 {
-                        return Err(RusdisError::InvalidCommand);
-                    }
+    match command {
+        Command::Ping => {
+            writer.write_all(b"+PONG\r\n").await?;
+        }
+        Command::Echo(words) => {
+            writer
+                .write_all(format!("+{}\r\n", words).as_bytes())
+                .await?;
+        }
+        Command::Set { key, value, px } => {
+            // Todo: implement "active" or "passive" way to delete data
+            let mut expiration = None;
 
-                    if let Value::BulkString(word) = &command[1] {
+            if let Some(mills) = px {
+                let now = Instant::now();
+                let fu = now.checked_add(Duration::from_millis(mills as u64));
+                if fu.is_none() {
+                    return Err(RusdisError::InstantAdditionError);
+                }
+
+                expiration = fu;
+            }
+
+            let mut data_handle = DATABASE.lock().await;
+            let _ = data_handle.insert(key, Data::new(value, expiration));
+            writer.write_all(b"+OK\r\n").await?;
+        }
+        Command::Get(key) => {
+            let mut data_handle = DATABASE.lock().await;
+            match data_handle.get(&key) {
+                Some(data) => {
+                    if data.is_expired() {
+                        let _ = data_handle.remove(&key);
+                        writer.write_all(b"$-1\r\n").await?;
+                    } else {
                         writer
-                            .write_all(format!("+{}\r\n", word).as_bytes())
+                            .write_all(
+                                format!("${}\r\n{}\r\n", data.get_data().len(), data.get_data())
+                                    .as_bytes(),
+                            )
                             .await?;
-                    } else {
-                        return Err(RusdisError::InvalidCommand);
                     }
                 }
-                "PING" => {
-                    writer.write_all(b"+PONG\r\n").await?;
+                None => {
+                    writer.write_all(b"$-1\r\n").await?;
                 }
-                "SET" => {
-                    if command.len() < 3 {
-                        return Err(RusdisError::InvalidCommand);
-                    }
-
-                    let (key, value) = (&command[1], &command[2]);
-
-                    match (key, value) {
-                        (Value::BulkString(k), Value::BulkString(v)) => {
-                            let mut data_handle = DATABASE.lock().await;
-                            let _ = data_handle.insert(k.to_string(), v.to_string());
-                            writer.write_all(b"+OK\r\n").await?;
-                        }
-                        _ => return Err(RusdisError::InvalidCommand),
-                    }
-                }
-                "GET" => {
-                    if command.len() < 2 {
-                        return Err(RusdisError::InvalidCommand);
-                    }
-
-                    if let Value::BulkString(key) = &command[1] {
-                        let data_handle = DATABASE.lock().await;
-                        match data_handle.get(key) {
-                            Some(val) => {
-                                writer
-                                    .write_all(format!("${}\r\n{}\r\n", val.len(), val).as_bytes())
-                                    .await?;
-                            }
-                            None => {
-                                writer.write_all(b"$-1\r\n").await?;
-                            }
-                        }
-                    } else {
-                        return Err(RusdisError::InvalidCommand);
-                    }
-                }
-                _ => {}
             }
         }
-        _ => {}
     }
+
+    //match &command[0] {
+    //    Value::BulkString(cmd) => {
+    //        let cmd = cmd.to_uppercase();
+    //        match cmd.as_str() {
+    //            "ECHO" => {
+    //                if command.len() < 2 {
+    //                    return Err(RusdisError::InvalidCommand);
+    //                }
+    //
+    //                if let Value::BulkString(word) = &command[1] {
+    //                    writer
+    //                        .write_all(format!("+{}\r\n", word).as_bytes())
+    //                        .await?;
+    //                } else {
+    //                    return Err(RusdisError::InvalidCommand);
+    //                }
+    //            }
+    //            "PING" => {
+    //                writer.write_all(b"+PONG\r\n").await?;
+    //            }
+    //            "SET" => {
+    //                if command.len() < 3 {
+    //                    return Err(RusdisError::InvalidCommand);
+    //                }
+    //
+    //                let (key, value) = (&command[1], &command[2]);
+    //
+    //                match (key, value) {
+    //                    (Value::BulkString(k), Value::BulkString(v)) => {
+    //                        let mut data_handle = DATABASE.lock().await;
+    //                        let _ = data_handle.insert(k.to_string(), v.to_string());
+    //                        writer.write_all(b"+OK\r\n").await?;
+    //                    }
+    //                    _ => return Err(RusdisError::InvalidCommand),
+    //                }
+    //            }
+    //            "GET" => {
+    //                if command.len() < 2 {
+    //                    return Err(RusdisError::InvalidCommand);
+    //                }
+    //
+    //                if let Value::BulkString(key) = &command[1] {
+    //                    let data_handle = DATABASE.lock().await;
+    //                    match data_handle.get(key) {
+    //                        Some(val) => {
+    //                            writer
+    //                                .write_all(format!("${}\r\n{}\r\n", val.len(), val).as_bytes())
+    //                                .await?;
+    //                        }
+    //                        None => {
+    //                            writer.write_all(b"$-1\r\n").await?;
+    //                        }
+    //                    }
+    //                } else {
+    //                    return Err(RusdisError::InvalidCommand);
+    //                }
+    //            }
+    //            _ => {}
+    //        }
+    //    }
+    //    _ => {}
+    //}
     Ok(())
 }

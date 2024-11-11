@@ -8,4 +8,10 @@ pub enum RusdisError {
     InvalidCommand,
     #[error("IO error")]
     IO(#[from] std::io::Error),
+    #[error("Command Parser Error: {msg}")]
+    CommandParserError { msg: String },
+    #[error("Parse int errors")]
+    ParseIntError(#[from] std::num::ParseIntError),
+    #[error("Instant addition error")]
+    InstantAdditionError,
 }

@@ -9,7 +9,12 @@ pub enum Command {
     Get(String),
     Ping,
     Echo(String),
-    ConfigGet(ConfigGetOption),
+    Config(ConfigSubcommand),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConfigSubcommand {
+    Get(ConfigGetOption),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -39,6 +44,7 @@ pub fn parse_command(value_vec: Vec<Value>) -> Result<Command, RusdisError> {
             "GET" => parse_get_command(value_iter),
             "PING" => Ok(Command::Ping),
             "ECHO" => parse_echo_command(value_iter),
+            "CONFIG" => parse_config_command(value_iter),
             _ => Err(RusdisError::CommandParserError {
                 msg: "Unrecognized command".to_string(),
             }),
@@ -47,6 +53,55 @@ pub fn parse_command(value_vec: Vec<Value>) -> Result<Command, RusdisError> {
         Err(RusdisError::CommandParserError {
             msg: "Invalid command format".to_string(),
         })
+    }
+}
+
+fn parse_config_command(mut iter: impl Iterator<Item = Value>) -> Result<Command, RusdisError> {
+    match iter.next() {
+        Some(subcommand_bulk_string) => {
+            if let Value::BulkString(subcommand) = subcommand_bulk_string {
+                let subcommand = subcommand.to_uppercase();
+                match subcommand.as_str() {
+                    "GET" => Ok(Command::Config(parse_config_get_command(iter)?)),
+                    _ => Err(RusdisError::CommandParserError {
+                        msg: "Unrecognizable subcommand in config command".to_string(),
+                    }),
+                }
+            } else {
+                Err(RusdisError::CommandParserError {
+                    msg: "Not Bulk String in command".to_string(),
+                })
+            }
+        }
+        None => Err(RusdisError::CommandParserError {
+            msg: "No subcommand in config command".to_string(),
+        }),
+    }
+}
+
+fn parse_config_get_command(
+    mut iter: impl Iterator<Item = Value>,
+) -> Result<ConfigSubcommand, RusdisError> {
+    match iter.next() {
+        Some(value) => {
+            if let Value::BulkString(parameter) = value {
+                let parameter = parameter.to_uppercase();
+                match parameter.as_str() {
+                    "DIR" => Ok(ConfigSubcommand::Get(ConfigGetOption::Dir)),
+                    "DBFILENAME" => Ok(ConfigSubcommand::Get(ConfigGetOption::DbFilename)),
+                    _ => Err(RusdisError::CommandParserError {
+                        msg: "Unrecognizable config get option".to_string(),
+                    }),
+                }
+            } else {
+                Err(RusdisError::CommandParserError {
+                    msg: "Not Bulk String in command".to_string(),
+                })
+            }
+        }
+        None => Err(RusdisError::CommandParserError {
+            msg: "No parameter in config get command".to_string(),
+        }),
     }
 }
 

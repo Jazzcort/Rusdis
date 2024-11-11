@@ -1,12 +1,16 @@
+mod cli_parser;
 mod command_parser;
 mod data;
 mod error;
 mod parser;
 
+use crate::cli_parser::Args;
 use crate::command_parser::{parse_command, Command};
 use crate::data::Data;
 use crate::error::RusdisError;
 use crate::parser::{parse, ParserError, Value};
+use clap::Parser;
+use command_parser::{ConfigGetOption, ConfigSubcommand};
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashMap;
@@ -23,10 +27,21 @@ lazy_static! {
     //static ref ARRAY_STRUCT: Regex = Regex::new(r#"^*"#).unwrap();
     //static ref BULK_STRING_STRUCT: Regex = Regex::new(r#"^$"#).unwrap();
     static ref DATABASE: Arc<Mutex<HashMap<String, Data>>> = Arc::new(Mutex::new(HashMap::new()));
+    static ref DIR: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    static ref DBFILENAME: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
 }
 
 #[tokio::main]
 async fn main() {
+    let args = Args::parse();
+    let mut dir_handle = DIR.lock().await;
+    *dir_handle = args.dir.clone();
+    drop(dir_handle);
+
+    let mut dbfilename_handle = DBFILENAME.lock().await;
+    *dbfilename_handle = args.dbfilename.clone();
+    drop(dbfilename_handle);
+
     // You can use print statements as follows for debugging, they'll be visible when running tests.
     println!("Logs from your program will appear here!");
 
@@ -92,9 +107,50 @@ async fn execute_commands(
                 .write_all(format!("+{}\r\n", words).as_bytes())
                 .await?;
         }
-        Command::ConfigGet(option) => {
-            todo!();
-        }
+        Command::Config(subcommand) => match subcommand {
+            ConfigSubcommand::Get(option) => match option {
+                ConfigGetOption::Dir => {
+                    let dir_handle = DIR.lock().await;
+                    let dir_ref = dir_handle.as_ref();
+                    match dir_ref {
+                        Some(dir) => {
+                            writer
+                                .write_all(
+                                    format!("*2\r\n$3\r\ndir\r\n${}\r\n{}\r\n", dir.len(), dir)
+                                        .as_bytes(),
+                                )
+                                .await?;
+                        }
+                        None => {
+                            writer.write_all(b"*2\r\n$3\r\ndir\r\n$-1\r\n").await?;
+                        }
+                    }
+                }
+                ConfigGetOption::DbFilename => {
+                    let dbfilename_handle = DBFILENAME.lock().await;
+                    let dbfilename_ref = dbfilename_handle.as_ref();
+                    match dbfilename_ref {
+                        Some(dbfilename) => {
+                            writer
+                                .write_all(
+                                    format!(
+                                        "*2\r\n$10\r\ndbfilename\r\n${}\r\n{}\r\n",
+                                        dbfilename.len(),
+                                        dbfilename
+                                    )
+                                    .as_bytes(),
+                                )
+                                .await?;
+                        }
+                        None => {
+                            writer
+                                .write_all(b"*2\r\n$10\r\ndbfilename\r\n$-1\r\n")
+                                .await?;
+                        }
+                    }
+                }
+            },
+        },
         Command::Set { key, value, px } => {
             // Todo: implement "active" or "passive" way to delete data
             let mut expiration = None;

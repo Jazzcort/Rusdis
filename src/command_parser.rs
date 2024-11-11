@@ -9,6 +9,13 @@ pub enum Command {
     Get(String),
     Ping,
     Echo(String),
+    ConfigGet(ConfigGetOption),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConfigGetOption {
+    Dir,
+    DbFilename,
 }
 
 pub fn parse_command(value_vec: Vec<Value>) -> Result<Command, RusdisError> {

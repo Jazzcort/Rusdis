@@ -92,6 +92,9 @@ async fn execute_commands(
                 .write_all(format!("+{}\r\n", words).as_bytes())
                 .await?;
         }
+        Command::ConfigGet(option) => {
+            todo!();
+        }
         Command::Set { key, value, px } => {
             // Todo: implement "active" or "passive" way to delete data
             let mut expiration = None;

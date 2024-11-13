@@ -3,12 +3,14 @@ mod command_parser;
 mod data;
 mod error;
 mod parser;
+mod rdb_file_reader;
 
 use crate::cli_parser::Args;
 use crate::command_parser::{parse_command, Command};
 use crate::data::Data;
 use crate::error::RusdisError;
 use crate::parser::{parse, ParserError, Value};
+use crate::rdb_file_reader::read_rdb;
 use clap::Parser;
 use command_parser::{ConfigGetOption, ConfigSubcommand};
 use lazy_static::lazy_static;
@@ -32,15 +34,42 @@ lazy_static! {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), RusdisError> {
     let args = Args::parse();
-    let mut dir_handle = DIR.lock().await;
-    *dir_handle = args.dir.clone();
-    drop(dir_handle);
+    tokio::join!(
+        async {
+            let mut dir_handle = DIR.lock().await;
+            *dir_handle = args.dir.clone();
+        },
+        async {
+            let mut dbfilename_handle = DBFILENAME.lock().await;
+            *dbfilename_handle = args.dbfilename.clone();
+        }
+    );
 
-    let mut dbfilename_handle = DBFILENAME.lock().await;
-    *dbfilename_handle = args.dbfilename.clone();
-    drop(dbfilename_handle);
+    let (dir_option, dbfilename_option) = tokio::join!(
+        async {
+            let dir_handle = DIR.lock().await;
+            dir_handle.clone()
+        },
+        async {
+            let dbfilename_handle = DBFILENAME.lock().await;
+            dbfilename_handle.clone()
+        },
+    );
+
+    match (dir_option, dbfilename_option) {
+        (Some(dir), Some(dbfilename)) => read_rdb(dir + &dbfilename)?,
+        _ => {}
+    }
+
+    //let mut dir_handle = DIR.lock().await;
+    //*dir_handle = args.dir.clone();
+    //drop(dir_handle);
+    //
+    //let mut dbfilename_handle = DBFILENAME.lock().await;
+    //*dbfilename_handle = args.dbfilename.clone();
+    //drop(dbfilename_handle);
 
     // You can use print statements as follows for debugging, they'll be visible when running tests.
     println!("Logs from your program will appear here!");
@@ -192,67 +221,5 @@ async fn execute_commands(
         }
     }
 
-    //match &command[0] {
-    //    Value::BulkString(cmd) => {
-    //        let cmd = cmd.to_uppercase();
-    //        match cmd.as_str() {
-    //            "ECHO" => {
-    //                if command.len() < 2 {
-    //                    return Err(RusdisError::InvalidCommand);
-    //                }
-    //
-    //                if let Value::BulkString(word) = &command[1] {
-    //                    writer
-    //                        .write_all(format!("+{}\r\n", word).as_bytes())
-    //                        .await?;
-    //                } else {
-    //                    return Err(RusdisError::InvalidCommand);
-    //                }
-    //            }
-    //            "PING" => {
-    //                writer.write_all(b"+PONG\r\n").await?;
-    //            }
-    //            "SET" => {
-    //                if command.len() < 3 {
-    //                    return Err(RusdisError::InvalidCommand);
-    //                }
-    //
-    //                let (key, value) = (&command[1], &command[2]);
-    //
-    //                match (key, value) {
-    //                    (Value::BulkString(k), Value::BulkString(v)) => {
-    //                        let mut data_handle = DATABASE.lock().await;
-    //                        let _ = data_handle.insert(k.to_string(), v.to_string());
-    //                        writer.write_all(b"+OK\r\n").await?;
-    //                    }
-    //                    _ => return Err(RusdisError::InvalidCommand),
-    //                }
-    //            }
-    //            "GET" => {
-    //                if command.len() < 2 {
-    //                    return Err(RusdisError::InvalidCommand);
-    //                }
-    //
-    //                if let Value::BulkString(key) = &command[1] {
-    //                    let data_handle = DATABASE.lock().await;
-    //                    match data_handle.get(key) {
-    //                        Some(val) => {
-    //                            writer
-    //                                .write_all(format!("${}\r\n{}\r\n", val.len(), val).as_bytes())
-    //                                .await?;
-    //                        }
-    //                        None => {
-    //                            writer.write_all(b"$-1\r\n").await?;
-    //                        }
-    //                    }
-    //                } else {
-    //                    return Err(RusdisError::InvalidCommand);
-    //                }
-    //            }
-    //            _ => {}
-    //        }
-    //    }
-    //    _ => {}
-    //}
     Ok(())
 }

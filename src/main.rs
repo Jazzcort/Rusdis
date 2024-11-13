@@ -59,7 +59,7 @@ async fn main() -> Result<(), RusdisError> {
     );
 
     match (dir_option, dbfilename_option) {
-        (Some(dir), Some(dbfilename)) => read_rdb(dir + &dbfilename)?,
+        (Some(dir), Some(dbfilename)) => read_rdb(dir + "/" + &dbfilename)?,
         _ => {}
     }
 

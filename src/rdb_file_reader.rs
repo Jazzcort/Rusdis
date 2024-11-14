@@ -11,7 +11,7 @@ pub fn read_rdb(f_path: String) -> Result<(), RusdisError> {
     let mut buf: [u8; 64] = [0; 64];
     reader.read(&mut buf);
     dbg!(&buf);
-    dbg!(String::from_utf8_lossy(&buf));
+    dbg!(String::from_utf16_lossy(&buf));
 
     //while reader.read_line(&mut line)? > 0 {
     //    dbg!(&line);

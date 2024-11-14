@@ -10,7 +10,7 @@ pub fn read_rdb(f_path: String) -> Result<(), RusdisError> {
     //let mut line = String::new();
     let mut buf: [u8; 1024] = [0; 1024];
     reader.read(&mut buf);
-    dbg!(buf);
+    dbg!(String::from_utf8_lossy(&buf));
 
     //while reader.read_line(&mut line)? > 0 {
     //    dbg!(&line);

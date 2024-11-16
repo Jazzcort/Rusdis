@@ -60,7 +60,6 @@ async fn main() -> Result<(), RusdisError> {
 
     match (dir_option, dbfilename_option) {
         (Some(dir), Some(dbfilename)) => {
-            dbg!(read_rdb(dir + "/" + &dbfilename)?.datasets);
             let rdb_file = read_rdb(dir + "/" + &dbfilename)?;
             let new_admin = Admin::new(rdb_file.datasets);
 

@@ -128,6 +128,7 @@ pub fn read_rdb(f_path: String) -> Result<RDBFile, RusdisError> {
                         let _ = iter.next();
                         let phantom_iter = iter;
                         let (mut phantom_iter, db_index) = decode_length(phantom_iter)?;
+                        dbg!(db_index);
                         // skip FB flag
                         let _ = phantom_iter.next();
 

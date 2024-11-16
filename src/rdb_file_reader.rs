@@ -221,6 +221,7 @@ pub fn read_rdb(f_path: String) -> Result<RDBFile, RusdisError> {
 fn parse_data(
     mut iter: Peekable<std::vec::IntoIter<u8>>,
 ) -> Result<(Peekable<std::vec::IntoIter<u8>>, (String, ValueType)), RusdisError> {
+    dbg!(iter.peek());
     match iter.next() {
         Some(data_type) => match data_type {
             0x00 => {

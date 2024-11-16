@@ -17,7 +17,7 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, SystemTime};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::tcp::WriteHalf;
 use tokio::net::{TcpListener, TcpStream};
@@ -187,7 +187,7 @@ async fn execute_commands(
             let mut expiration = None;
 
             if let Some(mills) = px {
-                let now = Instant::now();
+                let now = SystemTime::now();
                 let fu = now.checked_add(Duration::from_millis(mills as u64));
                 if fu.is_none() {
                     return Err(RusdisError::InstantAdditionError);

@@ -1,23 +1,23 @@
 use crate::rdb_file_reader::{Dataset, ValueType};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, SystemTime};
 use tokio::sync::Mutex;
 
 #[derive(Clone, Debug)]
 pub struct StringData {
     data: String,
-    expiration: Option<Instant>,
+    expiration: Option<SystemTime>,
 }
 
 impl StringData {
-    pub fn new(data: String, expiration: Option<Instant>) -> Self {
+    pub fn new(data: String, expiration: Option<SystemTime>) -> Self {
         StringData { data, expiration }
     }
 
     pub fn is_expired(&self) -> bool {
         if let Some(expiration) = self.expiration {
-            let now = Instant::now();
+            let now = SystemTime::now();
 
             if now >= expiration {
                 true
@@ -106,7 +106,7 @@ mod test {
 
     #[test]
     fn test_data_expired() {
-        let now = Instant::now();
+        let now = SystemTime::now();
         let fu = now.checked_add(Duration::from_millis(20)).unwrap();
         let data = StringData::new("Data stores here".to_string(), Some(fu));
 
@@ -129,7 +129,7 @@ mod test {
             pairs: vec![(
                 "key1".to_string(),
                 ValueType::String("value1".to_string()),
-                Some(Instant::now()),
+                Some(SystemTime::now()),
             )],
         };
         let d2 = Dataset {
@@ -137,7 +137,7 @@ mod test {
                 (
                     "key1".to_string(),
                     ValueType::String("value1".to_string()),
-                    Some(Instant::now()),
+                    Some(SystemTime::now()),
                 ),
                 (
                     "car".to_string(),

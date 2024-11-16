@@ -3,7 +3,7 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::io::BufReader;
 use std::iter::Peekable;
-use std::time::Instant;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub enum Phase {
     Header,
@@ -18,16 +18,18 @@ pub struct RDBFile {
     pub datasets: Vec<Dataset>,
 }
 
+#[derive(Debug)]
 pub struct Dataset {
-    pub pairs: Vec<(String, ValueType, Option<Instant>)>,
+    pub pairs: Vec<(String, ValueType, Option<SystemTime>)>,
 }
 
 impl Dataset {
-    pub fn get_pairs(self) -> Vec<(String, ValueType, Option<Instant>)> {
+    pub fn get_pairs(self) -> Vec<(String, ValueType, Option<SystemTime>)> {
         self.pairs
     }
 }
 
+#[derive(Clone, Debug)]
 pub enum ValueType {
     String(String),
 }
@@ -45,6 +47,7 @@ pub fn read_rdb(f_path: String) -> Result<RDBFile, RusdisError> {
     let mut phase = Phase::Header;
     let mut rdb_version = String::new();
     let mut aux_fields = vec![];
+    let mut datasets = vec![];
 
     loop {
         match phase {
@@ -94,10 +97,10 @@ pub fn read_rdb(f_path: String) -> Result<RDBFile, RusdisError> {
                     0xfa => {
                         // skip the FA flag
                         let _ = iter.next();
-                        let phanton_iter = iter;
-                        let (phanton_iter, key) = decode_string(phanton_iter)?;
-                        let (phanton_iter, value) = decode_string(phanton_iter)?;
-                        iter = phanton_iter;
+                        let phantom_iter = iter;
+                        let (phantom_iter, key) = decode_string(phantom_iter)?;
+                        let (phantom_iter, value) = decode_string(phantom_iter)?;
+                        iter = phantom_iter;
                         aux_fields.push((key, value));
                     }
                     0xfe => phase = Phase::Database,
@@ -110,17 +113,129 @@ pub fn read_rdb(f_path: String) -> Result<RDBFile, RusdisError> {
                 }
             }
             Phase::Database => {
-                break;
+                let flag = iter.peek();
+                if flag.is_none() {
+                    return Err(RusdisError::RDBFileParserError {
+                        msg: "Invalid RDB file format".to_string(),
+                    });
+                }
+
+                let flag = *flag.unwrap();
+
+                match flag {
+                    0xfe => {
+                        // skip FE flag
+                        let _ = iter.next();
+                        let phantom_iter = iter;
+                        let (mut phantom_iter, db_index) = decode_length(phantom_iter)?;
+                        // skip FB flag
+                        let _ = phantom_iter.next();
+
+                        let (phantom_iter, normal_table_size) = decode_length(phantom_iter)?;
+                        let (mut phantom_iter, expiry_table_size) = decode_length(phantom_iter)?;
+
+                        let mut pairs = vec![];
+                        for _ in 0..(normal_table_size + expiry_table_size) {
+                            match phantom_iter.next() {
+                                Some(byte) => match byte {
+                                    0xfd => {
+                                        let mut seconds = 0_u64;
+                                        for i in 0..4 {
+                                            let cur_byte = phantom_iter.next();
+                                            if cur_byte.is_none() {
+                                                return Err(RusdisError::RDBFileParserError {
+                                                    msg: "Invalid Timestamp format".to_string(),
+                                                });
+                                            }
+                                            let cur_byte = cur_byte.unwrap() as u64;
+
+                                            seconds += cur_byte << (i * 8);
+                                        }
+                                        let (p_iter, (key, value)) = parse_data(phantom_iter)?;
+                                        pairs.push((
+                                            key,
+                                            value,
+                                            Some(UNIX_EPOCH + Duration::from_secs(seconds)),
+                                        ));
+                                        phantom_iter = p_iter;
+                                    }
+                                    0xfc => {
+                                        let mut mills = 0_u64;
+                                        for i in 0..8 {
+                                            let cur_byte = phantom_iter.next();
+                                            if cur_byte.is_none() {
+                                                return Err(RusdisError::RDBFileParserError {
+                                                    msg: "Invalid Timestamp format".to_string(),
+                                                });
+                                            }
+                                            let cur_byte = cur_byte.unwrap() as u64;
+
+                                            mills += cur_byte << (i * 8);
+                                        }
+                                        let (p_iter, (key, value)) = parse_data(phantom_iter)?;
+                                        pairs.push((
+                                            key,
+                                            value,
+                                            Some(UNIX_EPOCH + Duration::from_millis(mills)),
+                                        ));
+                                        phantom_iter = p_iter;
+                                    }
+                                    _ => {
+                                        let (p_iter, (key, value)) = parse_data(phantom_iter)?;
+                                        pairs.push((key, value, None));
+                                        phantom_iter = p_iter;
+                                    }
+                                },
+                                None => {
+                                    return Err(RusdisError::RDBFileParserError {
+                                        msg: "Invalid RDB file format".to_string(),
+                                    })
+                                }
+                            }
+                        }
+                        iter = phantom_iter;
+                        datasets.push(Dataset { pairs });
+                    }
+                    0xff => {
+                        phase = Phase::CheckSum;
+                    }
+                    _ => {
+                        return Err(RusdisError::RDBFileParserError {
+                            msg: "Invalid RDB file format".to_string(),
+                        })
+                    }
+                }
             }
-            _ => {}
+            Phase::CheckSum => break,
         }
     }
     let rdb_file = RDBFile {
         rdb_version,
         aux_fields,
-        datasets: vec![],
+        datasets,
     };
     Ok(rdb_file)
+}
+
+fn parse_data(
+    mut iter: Peekable<std::vec::IntoIter<u8>>,
+) -> Result<(Peekable<std::vec::IntoIter<u8>>, (String, ValueType)), RusdisError> {
+    match iter.next() {
+        Some(data_type) => match data_type {
+            0x00 => {
+                let (iter, key) = decode_string(iter)?;
+                let (iter, value) = decode_string(iter)?;
+
+                Ok((iter, (key, ValueType::String(value))))
+            }
+            _ => Err(RusdisError::RDBFileParserError {
+                msg: "Not supported data type".to_string(),
+            }),
+        },
+        None => Err(RusdisError::RDBFileParserError {
+            msg: "No data to parse".to_string(),
+        }),
+    }
 }
 
 fn decode_string(

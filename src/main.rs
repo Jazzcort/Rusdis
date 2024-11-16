@@ -28,7 +28,7 @@ lazy_static! {
     //static ref START_WITH_SPECIAL: Regex = Regex::new(r#"^([\+-:$\*_#,=\(!%`>~])"#).unwrap();
     //static ref ARRAY_STRUCT: Regex = Regex::new(r#"^*"#).unwrap();
     //static ref BULK_STRING_STRUCT: Regex = Regex::new(r#"^$"#).unwrap();
-    static ref ADMIN: Arc<Mutex<Admin>> = Arc::new(Mutex::new(Admin::new(None)));
+    static ref ADMIN: Arc<Mutex<Admin>> = Arc::new(Mutex::new(Admin::new(vec![])));
     static ref DIR: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     static ref DBFILENAME: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
 }
@@ -61,9 +61,19 @@ async fn main() -> Result<(), RusdisError> {
     match (dir_option, dbfilename_option) {
         (Some(dir), Some(dbfilename)) => {
             dbg!(read_rdb(dir + "/" + &dbfilename)?.datasets);
+            let rdb_file = read_rdb(dir + "/" + &dbfilename)?;
+            let new_admin = Admin::new(rdb_file.datasets);
+
+            let mut admin_handle = ADMIN.lock().await;
+            *admin_handle = new_admin;
         }
         _ => {}
     }
+
+    let admin_handle = ADMIN.lock().await;
+    let string_data_arc = admin_handle.get_string_data_map();
+    drop(admin_handle);
+    dbg!(string_data_arc);
 
     //let mut dir_handle = DIR.lock().await;
     //*dir_handle = args.dir.clone();

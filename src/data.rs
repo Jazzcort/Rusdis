@@ -41,44 +41,33 @@ pub struct Admin {
 }
 
 impl Admin {
-    pub fn new(preload_datasets: Option<Vec<Dataset>>) -> Self {
-        match preload_datasets {
-            Some(datasets) => {
-                let length = datasets.len().max(16);
-                let mut databases = vec![Database::default(); length];
+    pub fn new(preload_datasets: Vec<Dataset>) -> Self {
+        let length = preload_datasets.len().max(16);
+        let mut databases = vec![Database::default(); length];
 
-                for (idx, dataset) in datasets.into_iter().enumerate() {
-                    let mut string_data_vec = vec![];
-                    for (key, value, expiration) in dataset.get_pairs().into_iter() {
-                        match value {
-                            ValueType::String(string) => string_data_vec.push((
-                                key,
-                                StringData {
-                                    data: string,
-                                    expiration,
-                                },
-                            )),
-                        }
-                    }
-
-                    let string_data = string_data_vec
-                        .into_iter()
-                        .collect::<HashMap<String, StringData>>();
-
-                    databases[idx].string_data = Arc::new(Mutex::new(string_data));
-                }
-                Admin {
-                    databases,
-                    cur_idx: 0,
+        for (idx, dataset) in preload_datasets.into_iter().enumerate() {
+            let mut string_data_vec = vec![];
+            for (key, value, expiration) in dataset.get_pairs().into_iter() {
+                match value {
+                    ValueType::String(string) => string_data_vec.push((
+                        key,
+                        StringData {
+                            data: string,
+                            expiration,
+                        },
+                    )),
                 }
             }
-            None => {
-                let databases = vec![Database::default(); 16];
-                Admin {
-                    databases,
-                    cur_idx: 0,
-                }
-            }
+
+            let string_data = string_data_vec
+                .into_iter()
+                .collect::<HashMap<String, StringData>>();
+
+            databases[idx].string_data = Arc::new(Mutex::new(string_data));
+        }
+        Admin {
+            databases,
+            cur_idx: 0,
         }
     }
 

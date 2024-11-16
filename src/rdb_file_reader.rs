@@ -40,8 +40,6 @@ pub fn read_rdb(f_path: String) -> Result<RDBFile, RusdisError> {
 
     let mut buf = vec![];
     let length = reader.read_to_end(&mut buf)?;
-    dbg!(&buf);
-    dbg!(String::from_utf8_lossy(&buf));
 
     let mut iter = buf.into_iter().peekable();
     let mut phase = Phase::Header;
@@ -128,14 +126,11 @@ pub fn read_rdb(f_path: String) -> Result<RDBFile, RusdisError> {
                         let _ = iter.next();
                         let phantom_iter = iter;
                         let (mut phantom_iter, db_index) = decode_length(phantom_iter)?;
-                        dbg!(db_index);
                         // skip FB flag
                         let _ = phantom_iter.next();
 
                         let (phantom_iter, normal_table_size) = decode_length(phantom_iter)?;
                         let (mut phantom_iter, expiry_table_size) = decode_length(phantom_iter)?;
-
-                        dbg!(normal_table_size, expiry_table_size);
 
                         let mut pairs = vec![];
                         for _ in 0..(normal_table_size + expiry_table_size) {
@@ -229,7 +224,6 @@ pub fn read_rdb(f_path: String) -> Result<RDBFile, RusdisError> {
 fn parse_data(
     mut iter: Peekable<std::vec::IntoIter<u8>>,
 ) -> Result<(Peekable<std::vec::IntoIter<u8>>, (String, ValueType)), RusdisError> {
-    dbg!(iter.peek());
     match iter.next() {
         Some(data_type) => match data_type {
             0x00 => {

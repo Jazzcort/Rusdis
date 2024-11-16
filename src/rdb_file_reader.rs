@@ -135,6 +135,8 @@ pub fn read_rdb(f_path: String) -> Result<RDBFile, RusdisError> {
                         let (phantom_iter, normal_table_size) = decode_length(phantom_iter)?;
                         let (mut phantom_iter, expiry_table_size) = decode_length(phantom_iter)?;
 
+                        dbg!(normal_table_size, expiry_table_size);
+
                         let mut pairs = vec![];
                         for _ in 0..(normal_table_size + expiry_table_size) {
                             match phantom_iter.next() {

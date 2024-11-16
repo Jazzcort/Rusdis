@@ -7,7 +7,7 @@ mod rdb_file_reader;
 
 use crate::cli_parser::Args;
 use crate::command_parser::{parse_command, Command};
-use crate::data::Data;
+use crate::data::{Admin, Database, StringData};
 use crate::error::RusdisError;
 use crate::parser::{parse, ParserError, Value};
 use crate::rdb_file_reader::read_rdb;
@@ -28,7 +28,7 @@ lazy_static! {
     //static ref START_WITH_SPECIAL: Regex = Regex::new(r#"^([\+-:$\*_#,=\(!%`>~])"#).unwrap();
     //static ref ARRAY_STRUCT: Regex = Regex::new(r#"^*"#).unwrap();
     //static ref BULK_STRING_STRUCT: Regex = Regex::new(r#"^$"#).unwrap();
-    static ref DATABASE: Arc<Mutex<HashMap<String, Data>>> = Arc::new(Mutex::new(HashMap::new()));
+    static ref ADMIN: Arc<Mutex<Admin>> = Arc::new(Mutex::new(Admin::new(None)));
     static ref DIR: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     static ref DBFILENAME: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
 }
@@ -59,7 +59,9 @@ async fn main() -> Result<(), RusdisError> {
     );
 
     match (dir_option, dbfilename_option) {
-        (Some(dir), Some(dbfilename)) => read_rdb(dir + "/" + &dbfilename)?,
+        (Some(dir), Some(dbfilename)) => {
+            dbg!(read_rdb(dir + "/" + &dbfilename)?.aux_fields);
+        }
         _ => {}
     }
 
@@ -194,16 +196,23 @@ async fn execute_commands(
                 expiration = fu;
             }
 
-            let mut data_handle = DATABASE.lock().await;
-            let _ = data_handle.insert(key, Data::new(value, expiration));
+            let admin_handle = ADMIN.lock().await;
+            let string_data_arc = admin_handle.get_string_data_map();
+            drop(admin_handle);
+            let mut string_data_handle = string_data_arc.lock().await;
+            let _ = string_data_handle.insert(key, StringData::new(value, expiration));
             writer.write_all(b"+OK\r\n").await?;
         }
         Command::Get(key) => {
-            let mut data_handle = DATABASE.lock().await;
-            match data_handle.get(&key) {
+            let admin_handle = ADMIN.lock().await;
+            let string_data_arc = admin_handle.get_string_data_map();
+            drop(admin_handle);
+            let mut string_data_handle = string_data_arc.lock().await;
+
+            match string_data_handle.get(&key) {
                 Some(data) => {
                     if data.is_expired() {
-                        let _ = data_handle.remove(&key);
+                        let _ = string_data_handle.remove(&key);
                         writer.write_all(b"$-1\r\n").await?;
                     } else {
                         writer

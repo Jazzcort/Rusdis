@@ -14,4 +14,6 @@ pub enum RusdisError {
     ParseIntError(#[from] std::num::ParseIntError),
     #[error("Instant addition error")]
     InstantAdditionError,
+    #[error("RDB File Parser Error: {msg}")]
+    RDBFileParserError { msg: String },
 }

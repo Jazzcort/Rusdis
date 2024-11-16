@@ -139,9 +139,12 @@ pub fn read_rdb(f_path: String) -> Result<RDBFile, RusdisError> {
 
                         let mut pairs = vec![];
                         for _ in 0..(normal_table_size + expiry_table_size) {
-                            match phantom_iter.next() {
+                            match phantom_iter.peek() {
                                 Some(byte) => match byte {
                                     0xfd => {
+                                        // skip FD flag
+                                        let _ = phantom_iter.next();
+
                                         let mut seconds = 0_u64;
                                         for i in 0..4 {
                                             let cur_byte = phantom_iter.next();
@@ -163,6 +166,9 @@ pub fn read_rdb(f_path: String) -> Result<RDBFile, RusdisError> {
                                         phantom_iter = p_iter;
                                     }
                                     0xfc => {
+                                        // skip FC flag
+                                        let _ = phantom_iter.next();
+
                                         let mut mills = 0_u64;
                                         for i in 0..8 {
                                             let cur_byte = phantom_iter.next();

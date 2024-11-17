@@ -60,11 +60,16 @@ async fn main() -> Result<(), RusdisError> {
 
     match (dir_option, dbfilename_option) {
         (Some(dir), Some(dbfilename)) => {
-            let rdb_file = read_rdb(dir + "/" + &dbfilename)?;
-            let new_admin = Admin::new(rdb_file.datasets);
+            let res = read_rdb(dir + "/" + &dbfilename);
+            match res {
+                Ok(rdb_file) => {
+                    let new_admin = Admin::new(rdb_file.datasets);
 
-            let mut admin_handle = ADMIN.lock().await;
-            *admin_handle = new_admin;
+                    let mut admin_handle = ADMIN.lock().await;
+                    *admin_handle = new_admin;
+                }
+                Err(_) => {}
+            }
         }
         _ => {}
     }

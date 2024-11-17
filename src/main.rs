@@ -69,7 +69,9 @@ async fn main() -> Result<(), RusdisError> {
                     let mut admin_handle = ADMIN.lock().await;
                     *admin_handle = new_admin;
                 }
-                Err(_) => {}
+                Err(e) => {
+                    dbg!(e);
+                }
             }
         }
         _ => {}

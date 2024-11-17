@@ -63,6 +63,7 @@ async fn main() -> Result<(), RusdisError> {
             let res = read_rdb(dir + "/" + &dbfilename);
             match res {
                 Ok(rdb_file) => {
+                    dbg!(&rdb_file.datasets);
                     let new_admin = Admin::new(rdb_file.datasets);
 
                     let mut admin_handle = ADMIN.lock().await;

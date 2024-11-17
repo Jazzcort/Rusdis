@@ -79,14 +79,6 @@ async fn main() -> Result<(), RusdisError> {
     drop(admin_handle);
     dbg!(string_data_arc);
 
-    //let mut dir_handle = DIR.lock().await;
-    //*dir_handle = args.dir.clone();
-    //drop(dir_handle);
-    //
-    //let mut dbfilename_handle = DBFILENAME.lock().await;
-    //*dbfilename_handle = args.dbfilename.clone();
-    //drop(dbfilename_handle);
-
     // You can use print statements as follows for debugging, they'll be visible when running tests.
     println!("Logs from your program will appear here!");
 

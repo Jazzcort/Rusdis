@@ -69,7 +69,17 @@ fn parse_keys_command(mut iter: impl Iterator<Item = Value>) -> Result<Command, 
     let pattern = pattern.unwrap();
 
     if let Value::BulkString(pattern) = pattern {
-        Ok(Command::Keys(pattern))
+        let mut new_pattern = String::new();
+
+        for b in pattern.into_bytes() {
+            if b == '*' as u8 {
+                new_pattern += ".*";
+            } else {
+                new_pattern.push(b as char);
+            }
+        }
+
+        Ok(Command::Keys(new_pattern))
     } else {
         Err(RusdisError::CommandParserError {
             msg: "Not Bulk String in command".to_string(),

@@ -210,7 +210,10 @@ pub fn read_rdb(f_path: String) -> Result<RDBFile, RusdisError> {
                     }
                 }
             }
-            Phase::CheckSum => break,
+            Phase::CheckSum => {
+                // implement later
+                break;
+            }
         }
     }
     let rdb_file = RDBFile {

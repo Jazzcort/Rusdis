@@ -1,4 +1,5 @@
 use crate::{RusdisError, Value};
+use regex::Regex;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
     Set {
@@ -10,6 +11,7 @@ pub enum Command {
     Ping,
     Echo(String),
     Config(ConfigSubcommand),
+    Keys(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -45,6 +47,7 @@ pub fn parse_command(value_vec: Vec<Value>) -> Result<Command, RusdisError> {
             "PING" => Ok(Command::Ping),
             "ECHO" => parse_echo_command(value_iter),
             "CONFIG" => parse_config_command(value_iter),
+            "KEYS" => parse_keys_command(value_iter),
             _ => Err(RusdisError::CommandParserError {
                 msg: "Unrecognized command".to_string(),
             }),
@@ -52,6 +55,24 @@ pub fn parse_command(value_vec: Vec<Value>) -> Result<Command, RusdisError> {
     } else {
         Err(RusdisError::CommandParserError {
             msg: "Invalid command format".to_string(),
+        })
+    }
+}
+
+fn parse_keys_command(mut iter: impl Iterator<Item = Value>) -> Result<Command, RusdisError> {
+    let pattern = iter.next();
+    if pattern.is_none() {
+        return Err(RusdisError::CommandParserError {
+            msg: "No pattern after keys command".to_string(),
+        });
+    }
+    let pattern = pattern.unwrap();
+
+    if let Value::BulkString(pattern) = pattern {
+        Ok(Command::Keys(pattern))
+    } else {
+        Err(RusdisError::CommandParserError {
+            msg: "Not Bulk String in command".to_string(),
         })
     }
 }

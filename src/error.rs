@@ -1,3 +1,4 @@
+use regex;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -16,4 +17,6 @@ pub enum RusdisError {
     InstantAdditionError,
     #[error("RDB File Parser Error: {msg}")]
     RDBFileParserError { msg: String },
+    #[error("Regex Error")]
+    RegexError(#[from] regex::Error),
 }

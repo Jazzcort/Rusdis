@@ -237,6 +237,27 @@ async fn execute_commands(
                 }
             }
         }
+        Command::Keys(pattern_string) => {
+            let pattern = Regex::new(&pattern_string)?;
+            let admin_handle = ADMIN.lock().await;
+            let string_data_arc = admin_handle.get_string_data_map();
+            drop(admin_handle);
+            let string_data_handle = string_data_arc.lock().await;
+            let mut res = vec![];
+
+            for key in string_data_handle.keys() {
+                if pattern.is_match(key) {
+                    res.push(key);
+                }
+            }
+
+            let mut reply_string = format!("*{}\r\n", res.len());
+            for matched_key in res.into_iter() {
+                reply_string += format!("${}\r\n{}\r\n", matched_key.len(), matched_key).as_str();
+            }
+
+            writer.write_all(reply_string.as_bytes()).await?;
+        }
     }
 
     Ok(())

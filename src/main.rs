@@ -238,6 +238,7 @@ async fn execute_commands(
             }
         }
         Command::Keys(pattern_string) => {
+            dbg!(&pattern_string);
             let pattern = Regex::new(&pattern_string)?;
             let admin_handle = ADMIN.lock().await;
             let string_data_arc = admin_handle.get_string_data_map();

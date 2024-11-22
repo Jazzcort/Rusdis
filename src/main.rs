@@ -267,7 +267,7 @@ async fn execute_commands(
             //let a = string_data_handle.get_mut(&key);
 
             let data = string_data_handle
-                .entry(&key)
+                .entry(key)
                 .or_insert(StringData::new("0".to_string(), None));
             let num_str = data.get_data();
             match num_str.parse::<i64>() {

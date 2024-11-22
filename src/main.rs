@@ -265,23 +265,40 @@ async fn execute_commands(
 
             let mut string_data_handle = string_data_arc.lock().await;
             //let a = string_data_handle.get_mut(&key);
-            match string_data_handle.get_mut(&key) {
-                Some(mut data) => {
-                    let num_str = data.get_data();
-                    match num_str.parse::<i64>() {
-                        Ok(mut num) => {
-                            if num < i64::MAX {
-                                num += 1;
-                            }
 
-                            data.set_data(format!("{}", num));
-                            writer.write_all(format!(":{}\r\n", num).as_bytes()).await?;
-                        }
-                        Err(_) => {}
+            let data = string_data_handle
+                .entry(&key)
+                .or_insert(StringData::new("0".to_string(), None));
+            let num_str = data.get_data();
+            match num_str.parse::<i64>() {
+                Ok(mut num) => {
+                    if num < i64::MAX {
+                        num += 1;
                     }
+
+                    data.set_data(format!("{}", num));
+                    writer.write_all(format!(":{}\r\n", num).as_bytes()).await?;
                 }
-                None => {}
+                Err(_) => {}
             }
+
+            //match string_data_handle.get_mut(&key) {
+            //    Some(mut data) => {
+            //        let num_str = data.get_data();
+            //        match num_str.parse::<i64>() {
+            //            Ok(mut num) => {
+            //                if num < i64::MAX {
+            //                    num += 1;
+            //                }
+            //
+            //                data.set_data(format!("{}", num));
+            //                writer.write_all(format!(":{}\r\n", num).as_bytes()).await?;
+            //            }
+            //            Err(_) => {}
+            //        }
+            //    }
+            //    None => {}
+            //}
 
             //if string_data_handle.contains_key(&key) {
             //

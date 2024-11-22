@@ -279,7 +279,11 @@ async fn execute_commands(
                     data.set_data(format!("{}", num));
                     writer.write_all(format!(":{}\r\n", num).as_bytes()).await?;
                 }
-                Err(_) => {}
+                Err(_) => {
+                    writer
+                        .write_all(b"-ERR value is not an integer or out of range\r\n")
+                        .await?;
+                }
             }
 
             //match string_data_handle.get_mut(&key) {

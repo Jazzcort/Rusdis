@@ -263,7 +263,7 @@ async fn execute_commands(
             let string_data_arc = admin_handle.get_string_data_map();
             drop(admin_handle);
 
-            let string_data_handle = string_data_arc.lock().await;
+            let mut string_data_handle = string_data_arc.lock().await;
             //let a = string_data_handle.get_mut(&key);
             match string_data_handle.get_mut(&key) {
                 Some(mut data) => {

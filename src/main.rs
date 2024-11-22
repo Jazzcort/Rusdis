@@ -238,7 +238,6 @@ async fn execute_commands(
             }
         }
         Command::Keys(pattern_string) => {
-            dbg!(&pattern_string);
             let pattern = Regex::new(&pattern_string)?;
             let admin_handle = ADMIN.lock().await;
             let string_data_arc = admin_handle.get_string_data_map();
@@ -258,6 +257,35 @@ async fn execute_commands(
             }
 
             writer.write_all(reply_string.as_bytes()).await?;
+        }
+        Command::Incr(key) => {
+            let admin_handle = ADMIN.lock().await;
+            let string_data_arc = admin_handle.get_string_data_map();
+            drop(admin_handle);
+
+            let string_data_handle = string_data_arc.lock().await;
+            //let a = string_data_handle.get_mut(&key);
+            match string_data_handle.get_mut(&key) {
+                Some(mut data) => {
+                    let num_str = data.get_data();
+                    match num_str.parse::<i64>() {
+                        Ok(mut num) => {
+                            if num < i64::MAX {
+                                num += 1;
+                            }
+
+                            data.set_data(format!("{}", num));
+                            writer.write_all(format!(":{}\r\n", num).as_bytes()).await?;
+                        }
+                        Err(_) => {}
+                    }
+                }
+                None => {}
+            }
+
+            //if string_data_handle.contains_key(&key) {
+            //
+            //}
         }
     }
 

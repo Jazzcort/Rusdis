@@ -32,6 +32,10 @@ impl StringData {
     pub fn get_data(&self) -> &String {
         &self.data
     }
+
+    pub fn set_data(&mut self, s: String) {
+        self.data = s;
+    }
 }
 
 #[derive(Debug)]

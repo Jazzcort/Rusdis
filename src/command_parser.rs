@@ -12,6 +12,7 @@ pub enum Command {
     Echo(String),
     Config(ConfigSubcommand),
     Keys(String),
+    Incr(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -48,6 +49,7 @@ pub fn parse_command(value_vec: Vec<Value>) -> Result<Command, RusdisError> {
             "ECHO" => parse_echo_command(value_iter),
             "CONFIG" => parse_config_command(value_iter),
             "KEYS" => parse_keys_command(value_iter),
+            "INCR" => parse_incr_command(value_iter),
             _ => Err(RusdisError::CommandParserError {
                 msg: "Unrecognized command".to_string(),
             }),
@@ -55,6 +57,24 @@ pub fn parse_command(value_vec: Vec<Value>) -> Result<Command, RusdisError> {
     } else {
         Err(RusdisError::CommandParserError {
             msg: "Invalid command format".to_string(),
+        })
+    }
+}
+
+fn parse_incr_command(mut iter: impl Iterator<Item = Value>) -> Result<Command, RusdisError> {
+    let key = iter.next();
+    if key.is_none() {
+        return Err(RusdisError::CommandParserError {
+            msg: "No key after incr command".to_string(),
+        });
+    }
+    let key = key.unwrap();
+
+    if let Value::BulkString(key) = key {
+        Ok(Command::Incr(key))
+    } else {
+        Err(RusdisError::CommandParserError {
+            msg: "Not Bulk String in command".to_string(),
         })
     }
 }

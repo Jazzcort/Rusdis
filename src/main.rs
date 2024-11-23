@@ -139,6 +139,11 @@ async fn handle_commands(mut stream: TcpStream) -> Result<(), RusdisError> {
                         writer.write_all(b"+OK\r\n").await;
                     }
                     Command::Exec => {
+                        if !is_multi {
+                            writer.write_all(b"-ERR EXEC without MULTI\r\n").await;
+                            continue;
+                        }
+
                         let reply_string = execute_multi_commands(queue).await;
                         queue = vec![];
                         is_multi = false;

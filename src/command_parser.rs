@@ -13,6 +13,8 @@ pub enum Command {
     Config(ConfigSubcommand),
     Keys(String),
     Incr(String),
+    Multi,
+    Exec,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -50,6 +52,8 @@ pub fn parse_command(value_vec: Vec<Value>) -> Result<Command, RusdisError> {
             "CONFIG" => parse_config_command(value_iter),
             "KEYS" => parse_keys_command(value_iter),
             "INCR" => parse_incr_command(value_iter),
+            "MULTI" => Ok(Command::Multi),
+            "EXEC" => Ok(Command::Exec),
             _ => Err(RusdisError::CommandParserError {
                 msg: "Unrecognized command".to_string(),
             }),

@@ -15,7 +15,7 @@ use clap::Parser;
 use command_parser::{ConfigGetOption, ConfigSubcommand};
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -110,6 +110,8 @@ async fn main() -> Result<(), RusdisError> {
 async fn handle_commands(mut stream: TcpStream) -> Result<(), RusdisError> {
     let (reader, mut writer) = stream.split();
     let mut reader = BufReader::new(reader);
+    let mut is_multi = false;
+    let mut queue = vec![];
 
     loop {
         let mut buf = Vec::from(reader.fill_buf().await?);
@@ -119,10 +121,38 @@ async fn handle_commands(mut stream: TcpStream) -> Result<(), RusdisError> {
         reader.consume(buf.len());
         let commands = String::from_utf8_lossy(&buf).to_string();
         println!("{}", commands);
+        // wrong protocol: need to disconnect
         let value = parse(commands)?;
 
         match value {
             Value::Array(cmds) => {
+                let cmd = parse_command(cmds);
+                if cmd.is_err() {
+                    continue;
+                }
+
+                let cmd = cmd.unwrap();
+
+                match cmd {
+                    Command::Multi => {
+                        is_multi = true;
+                        writer.write_all(b"+OK\r\n");
+                    }
+                    Command::Exec => {
+                        let reply_string = execute_multi_commands(queue).await;
+                        queue = vec![];
+                        writer.write_all(reply_string.as_bytes()).await;
+                    }
+                    other => {
+                        if !is_multi {
+                            execute_commands(other, &mut writer).await;
+                        } else {
+                            queue.push(other);
+                            writer.write_all(b"+QUEUED\r\n");
+                        }
+                    }
+                }
+
                 execute_commands(cmds, &mut writer).await?;
             }
             _ => {}
@@ -131,12 +161,159 @@ async fn handle_commands(mut stream: TcpStream) -> Result<(), RusdisError> {
     Ok(())
 }
 
-async fn execute_commands(
-    command: Vec<Value>,
-    writer: &mut WriteHalf<'_>,
-) -> Result<(), RusdisError> {
+async fn execute_multi_commands(commands: Vec<Command>) -> String {
+    let length = commands.len();
+    let mut res = format!("*{}\r\n", length);
+
+    for cmd in commands.into_iter() {
+        match cmd {
+            Command::Ping => {
+                res += "+PONG\r\n";
+            }
+            Command::Echo(words) => {
+                res += format!("+{}\r\n", words).as_str();
+            }
+            Command::Config(subcommand) => match subcommand {
+                ConfigSubcommand::Get(option) => match option {
+                    ConfigGetOption::Dir => {
+                        let dir_handle = DIR.lock().await;
+                        let dir_ref = dir_handle.as_ref();
+                        match dir_ref {
+                            Some(dir) => {
+                                res += format!("*2\r\n$3\r\ndir\r\n${}\r\n{}\r\n", dir.len(), dir)
+                                    .as_str();
+                            }
+                            None => {
+                                res += "*2\r\n$3\r\ndir\r\n$-1\r\n";
+                            }
+                        }
+                    }
+                    ConfigGetOption::DbFilename => {
+                        let dbfilename_handle = DBFILENAME.lock().await;
+                        let dbfilename_ref = dbfilename_handle.as_ref();
+                        match dbfilename_ref {
+                            Some(dbfilename) => {
+                                res += format!(
+                                    "*2\r\n$10\r\ndbfilename\r\n${}\r\n{}\r\n",
+                                    dbfilename.len(),
+                                    dbfilename
+                                )
+                                .as_str();
+                            }
+                            None => {
+                                res += "*2\r\n$10\r\ndbfilename\r\n$-1\r\n";
+                            }
+                        }
+                    }
+                },
+            },
+            Command::Set { key, value, px } => {
+                // Todo: implement "active" or "passive" way to delete data
+                let mut expiration = None;
+
+                if let Some(mills) = px {
+                    let now = SystemTime::now();
+                    let fu = now.checked_add(Duration::from_millis(mills as u64));
+                    if fu.is_none() {
+                        res += "-ERR Instant Addtion Error";
+                        continue;
+                    }
+
+                    expiration = fu;
+                }
+
+                let admin_handle = ADMIN.lock().await;
+                let string_data_arc = admin_handle.get_string_data_map();
+                drop(admin_handle);
+                let mut string_data_handle = string_data_arc.lock().await;
+                let _ = string_data_handle.insert(key, StringData::new(value, expiration));
+                res += "+OK\r\n";
+            }
+            Command::Get(key) => {
+                let admin_handle = ADMIN.lock().await;
+                let string_data_arc = admin_handle.get_string_data_map();
+                drop(admin_handle);
+                let mut string_data_handle = string_data_arc.lock().await;
+
+                match string_data_handle.get(&key) {
+                    Some(data) => {
+                        if data.is_expired() {
+                            let _ = string_data_handle.remove(&key);
+                            res += "$-1\r\n";
+                        } else {
+                            res += format!("${}\r\n{}\r\n", data.get_data().len(), data.get_data())
+                                .as_str();
+                        }
+                    }
+                    None => {
+                        res += "$-1\r\n";
+                    }
+                }
+            }
+            Command::Keys(pattern_string) => {
+                let pattern = Regex::new(&pattern_string);
+                if pattern.is_err() {
+                    res += "-ERR Invalid Regex Format";
+                    continue;
+                }
+                let pattern = pattern.unwrap();
+
+                let admin_handle = ADMIN.lock().await;
+                let string_data_arc = admin_handle.get_string_data_map();
+                drop(admin_handle);
+                let string_data_handle = string_data_arc.lock().await;
+                let mut res_vec = vec![];
+
+                for key in string_data_handle.keys() {
+                    if pattern.is_match(key) {
+                        res_vec.push(key);
+                    }
+                }
+
+                let mut reply_string = format!("*{}\r\n", res.len());
+                for matched_key in res_vec.into_iter() {
+                    reply_string +=
+                        format!("${}\r\n{}\r\n", matched_key.len(), matched_key).as_str();
+                }
+
+                res += reply_string.as_str();
+            }
+            Command::Incr(key) => {
+                let admin_handle = ADMIN.lock().await;
+                let string_data_arc = admin_handle.get_string_data_map();
+                drop(admin_handle);
+
+                let mut string_data_handle = string_data_arc.lock().await;
+
+                let data = string_data_handle
+                    .entry(key)
+                    .or_insert(StringData::new("0".to_string(), None));
+                let num_str = data.get_data();
+                match num_str.parse::<i64>() {
+                    Ok(mut num) => {
+                        if num < i64::MAX {
+                            num += 1;
+                        }
+
+                        data.set_data(format!("{}", num));
+                        res += format!(":{}\r\n", num).as_str();
+                    }
+                    Err(_) => {
+                        res += "-ERR value is not an integer or out of range\r\n";
+                    }
+                }
+            }
+            _ => {
+                res += "-ERR not supported command";
+            }
+        }
+    }
+
+    res
+}
+
+async fn execute_commands(command: Command, writer: &mut WriteHalf<'_>) -> Result<(), RusdisError> {
     dbg!(&command);
-    let command = parse_command(command)?;
 
     match command {
         Command::Ping => {
@@ -285,29 +462,8 @@ async fn execute_commands(
                         .await?;
                 }
             }
-
-            //match string_data_handle.get_mut(&key) {
-            //    Some(mut data) => {
-            //        let num_str = data.get_data();
-            //        match num_str.parse::<i64>() {
-            //            Ok(mut num) => {
-            //                if num < i64::MAX {
-            //                    num += 1;
-            //                }
-            //
-            //                data.set_data(format!("{}", num));
-            //                writer.write_all(format!(":{}\r\n", num).as_bytes()).await?;
-            //            }
-            //            Err(_) => {}
-            //        }
-            //    }
-            //    None => {}
-            //}
-
-            //if string_data_handle.contains_key(&key) {
-            //
-            //}
         }
+        _ => {}
     }
 
     Ok(())

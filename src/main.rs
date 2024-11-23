@@ -141,6 +141,7 @@ async fn handle_commands(mut stream: TcpStream) -> Result<(), RusdisError> {
                     Command::Exec => {
                         let reply_string = execute_multi_commands(queue).await;
                         queue = vec![];
+                        is_multi = false;
                         writer.write_all(reply_string.as_bytes()).await;
                     }
                     other => {

@@ -15,6 +15,7 @@ pub enum Command {
     Incr(String),
     Multi,
     Exec,
+    Discard,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -54,6 +55,7 @@ pub fn parse_command(value_vec: Vec<Value>) -> Result<Command, RusdisError> {
             "INCR" => parse_incr_command(value_iter),
             "MULTI" => Ok(Command::Multi),
             "EXEC" => Ok(Command::Exec),
+            "DISCARD" => Ok(Command::Discard),
             _ => Err(RusdisError::CommandParserError {
                 msg: "Unrecognized command".to_string(),
             }),

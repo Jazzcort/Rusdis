@@ -149,6 +149,16 @@ async fn handle_commands(mut stream: TcpStream) -> Result<(), RusdisError> {
                         is_multi = false;
                         writer.write_all(reply_string.as_bytes()).await;
                     }
+                    Command::Discard => {
+                        if !is_multi {
+                            writer.write_all(b"-ERR DISCARD without MULTI\r\n").await;
+                            continue;
+                        }
+
+                        queue.clear();
+                        is_multi = false;
+                        writer.write_all(b"+OK\r\n").await;
+                    }
                     other => {
                         if !is_multi {
                             execute_commands(other, &mut writer).await;

@@ -154,7 +154,7 @@ async fn handle_commands(mut stream: TcpStream) -> Result<(), RusdisError> {
                             execute_commands(other, &mut writer).await;
                         } else {
                             queue.push(other);
-                            writer.write_all(b"+QUEUED\r\n");
+                            writer.write_all(b"+QUEUED\r\n").await;
                         }
                     }
                 }

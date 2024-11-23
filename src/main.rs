@@ -152,8 +152,6 @@ async fn handle_commands(mut stream: TcpStream) -> Result<(), RusdisError> {
                         }
                     }
                 }
-
-                execute_commands(cmds, &mut writer).await?;
             }
             _ => {}
         }

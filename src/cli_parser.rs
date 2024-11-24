@@ -14,4 +14,8 @@ pub struct Args {
     /// Port number to listen to
     #[arg(long)]
     pub port: Option<String>,
+
+    /// Master to listen to
+    #[arg(long)]
+    pub replicaof: Option<String>,
 }

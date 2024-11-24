@@ -31,6 +31,7 @@ lazy_static! {
     static ref ADMIN: Arc<Mutex<Admin>> = Arc::new(Mutex::new(Admin::new(vec![])));
     static ref DIR: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     static ref DBFILENAME: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    static ref ROLE: Arc<Mutex<String>> = Arc::new(Mutex::new(String::from("master")));
 }
 
 #[tokio::main]
@@ -44,8 +45,13 @@ async fn main() -> Result<(), RusdisError> {
         async {
             let mut dbfilename_handle = DBFILENAME.lock().await;
             *dbfilename_handle = args.dbfilename.clone();
-        }
+        },
     );
+
+    if args.replicaof.is_some() {
+        let mut role_handle = ROLE.lock().await;
+        *role_handle = String::from("slave");
+    }
 
     let (dir_option, dbfilename_option) = tokio::join!(
         async {
@@ -333,8 +339,9 @@ async fn execute_multi_commands(commands: Vec<Command>, is_multi: bool) -> Strin
                 for section in sections.into_iter() {
                     match section {
                         InfoSection::Replication => {
-                            let role = "role:master\n";
-                            string += role;
+                            let role_handle = ROLE.lock().await;
+                            let role = role_handle.clone() + "\n";
+                            string += role.as_str();
                             cnt += role.len();
                         }
                     }
@@ -354,159 +361,160 @@ async fn execute_multi_commands(commands: Vec<Command>, is_multi: bool) -> Strin
     res
 }
 
-async fn execute_commands(command: Command, writer: &mut WriteHalf<'_>) -> Result<(), RusdisError> {
-    dbg!(&command);
-
-    match command {
-        Command::Ping => {
-            writer.write_all(b"+PONG\r\n").await?;
-        }
-        Command::Echo(words) => {
-            writer
-                .write_all(format!("+{}\r\n", words).as_bytes())
-                .await?;
-        }
-        Command::Config(subcommand) => match subcommand {
-            ConfigSubcommand::Get(option) => match option {
-                ConfigGetOption::Dir => {
-                    let dir_handle = DIR.lock().await;
-                    let dir_ref = dir_handle.as_ref();
-                    match dir_ref {
-                        Some(dir) => {
-                            writer
-                                .write_all(
-                                    format!("*2\r\n$3\r\ndir\r\n${}\r\n{}\r\n", dir.len(), dir)
-                                        .as_bytes(),
-                                )
-                                .await?;
-                        }
-                        None => {
-                            writer.write_all(b"*2\r\n$3\r\ndir\r\n$-1\r\n").await?;
-                        }
-                    }
-                }
-                ConfigGetOption::DbFilename => {
-                    let dbfilename_handle = DBFILENAME.lock().await;
-                    let dbfilename_ref = dbfilename_handle.as_ref();
-                    match dbfilename_ref {
-                        Some(dbfilename) => {
-                            writer
-                                .write_all(
-                                    format!(
-                                        "*2\r\n$10\r\ndbfilename\r\n${}\r\n{}\r\n",
-                                        dbfilename.len(),
-                                        dbfilename
-                                    )
-                                    .as_bytes(),
-                                )
-                                .await?;
-                        }
-                        None => {
-                            writer
-                                .write_all(b"*2\r\n$10\r\ndbfilename\r\n$-1\r\n")
-                                .await?;
-                        }
-                    }
-                }
-            },
-        },
-        Command::Set { key, value, px } => {
-            // Todo: implement "active" or "passive" way to delete data
-            let mut expiration = None;
-
-            if let Some(mills) = px {
-                let now = SystemTime::now();
-                let fu = now.checked_add(Duration::from_millis(mills as u64));
-                if fu.is_none() {
-                    return Err(RusdisError::InstantAdditionError);
-                }
-
-                expiration = fu;
-            }
-
-            let admin_handle = ADMIN.lock().await;
-            let string_data_arc = admin_handle.get_string_data_map();
-            drop(admin_handle);
-            let mut string_data_handle = string_data_arc.lock().await;
-            let _ = string_data_handle.insert(key, StringData::new(value, expiration));
-            writer.write_all(b"+OK\r\n").await?;
-        }
-        Command::Get(key) => {
-            let admin_handle = ADMIN.lock().await;
-            let string_data_arc = admin_handle.get_string_data_map();
-            drop(admin_handle);
-            let mut string_data_handle = string_data_arc.lock().await;
-
-            match string_data_handle.get(&key) {
-                Some(data) => {
-                    if data.is_expired() {
-                        let _ = string_data_handle.remove(&key);
-                        writer.write_all(b"$-1\r\n").await?;
-                    } else {
-                        writer
-                            .write_all(
-                                format!("${}\r\n{}\r\n", data.get_data().len(), data.get_data())
-                                    .as_bytes(),
-                            )
-                            .await?;
-                    }
-                }
-                None => {
-                    writer.write_all(b"$-1\r\n").await?;
-                }
-            }
-        }
-        Command::Keys(pattern_string) => {
-            let pattern = Regex::new(&pattern_string)?;
-            let admin_handle = ADMIN.lock().await;
-            let string_data_arc = admin_handle.get_string_data_map();
-            drop(admin_handle);
-            let string_data_handle = string_data_arc.lock().await;
-            let mut res = vec![];
-
-            for key in string_data_handle.keys() {
-                if pattern.is_match(key) {
-                    res.push(key);
-                }
-            }
-
-            let mut reply_string = format!("*{}\r\n", res.len());
-            for matched_key in res.into_iter() {
-                reply_string += format!("${}\r\n{}\r\n", matched_key.len(), matched_key).as_str();
-            }
-
-            writer.write_all(reply_string.as_bytes()).await?;
-        }
-        Command::Incr(key) => {
-            let admin_handle = ADMIN.lock().await;
-            let string_data_arc = admin_handle.get_string_data_map();
-            drop(admin_handle);
-
-            let mut string_data_handle = string_data_arc.lock().await;
-            //let a = string_data_handle.get_mut(&key);
-
-            let data = string_data_handle
-                .entry(key)
-                .or_insert(StringData::new("0".to_string(), None));
-            let num_str = data.get_data();
-            match num_str.parse::<i64>() {
-                Ok(mut num) => {
-                    if num < i64::MAX {
-                        num += 1;
-                    }
-
-                    data.set_data(format!("{}", num));
-                    writer.write_all(format!(":{}\r\n", num).as_bytes()).await?;
-                }
-                Err(_) => {
-                    writer
-                        .write_all(b"-ERR value is not an integer or out of range\r\n")
-                        .await?;
-                }
-            }
-        }
-        _ => {}
-    }
-
-    Ok(())
-}
+// Review it and delete
+//async fn execute_commands(command: Command, writer: &mut WriteHalf<'_>) -> Result<(), RusdisError> {
+//    dbg!(&command);
+//
+//    match command {
+//        Command::Ping => {
+//            writer.write_all(b"+PONG\r\n").await?;
+//        }
+//        Command::Echo(words) => {
+//            writer
+//                .write_all(format!("+{}\r\n", words).as_bytes())
+//                .await?;
+//        }
+//        Command::Config(subcommand) => match subcommand {
+//            ConfigSubcommand::Get(option) => match option {
+//                ConfigGetOption::Dir => {
+//                    let dir_handle = DIR.lock().await;
+//                    let dir_ref = dir_handle.as_ref();
+//                    match dir_ref {
+//                        Some(dir) => {
+//                            writer
+//                                .write_all(
+//                                    format!("*2\r\n$3\r\ndir\r\n${}\r\n{}\r\n", dir.len(), dir)
+//                                        .as_bytes(),
+//                                )
+//                                .await?;
+//                        }
+//                        None => {
+//                            writer.write_all(b"*2\r\n$3\r\ndir\r\n$-1\r\n").await?;
+//                        }
+//                    }
+//                }
+//                ConfigGetOption::DbFilename => {
+//                    let dbfilename_handle = DBFILENAME.lock().await;
+//                    let dbfilename_ref = dbfilename_handle.as_ref();
+//                    match dbfilename_ref {
+//                        Some(dbfilename) => {
+//                            writer
+//                                .write_all(
+//                                    format!(
+//                                        "*2\r\n$10\r\ndbfilename\r\n${}\r\n{}\r\n",
+//                                        dbfilename.len(),
+//                                        dbfilename
+//                                    )
+//                                    .as_bytes(),
+//                                )
+//                                .await?;
+//                        }
+//                        None => {
+//                            writer
+//                                .write_all(b"*2\r\n$10\r\ndbfilename\r\n$-1\r\n")
+//                                .await?;
+//                        }
+//                    }
+//                }
+//            },
+//        },
+//        Command::Set { key, value, px } => {
+//            // Todo: implement "active" or "passive" way to delete data
+//            let mut expiration = None;
+//
+//            if let Some(mills) = px {
+//                let now = SystemTime::now();
+//                let fu = now.checked_add(Duration::from_millis(mills as u64));
+//                if fu.is_none() {
+//                    return Err(RusdisError::InstantAdditionError);
+//                }
+//
+//                expiration = fu;
+//            }
+//
+//            let admin_handle = ADMIN.lock().await;
+//            let string_data_arc = admin_handle.get_string_data_map();
+//            drop(admin_handle);
+//            let mut string_data_handle = string_data_arc.lock().await;
+//            let _ = string_data_handle.insert(key, StringData::new(value, expiration));
+//            writer.write_all(b"+OK\r\n").await?;
+//        }
+//        Command::Get(key) => {
+//            let admin_handle = ADMIN.lock().await;
+//            let string_data_arc = admin_handle.get_string_data_map();
+//            drop(admin_handle);
+//            let mut string_data_handle = string_data_arc.lock().await;
+//
+//            match string_data_handle.get(&key) {
+//                Some(data) => {
+//                    if data.is_expired() {
+//                        let _ = string_data_handle.remove(&key);
+//                        writer.write_all(b"$-1\r\n").await?;
+//                    } else {
+//                        writer
+//                            .write_all(
+//                                format!("${}\r\n{}\r\n", data.get_data().len(), data.get_data())
+//                                    .as_bytes(),
+//                            )
+//                            .await?;
+//                    }
+//                }
+//                None => {
+//                    writer.write_all(b"$-1\r\n").await?;
+//                }
+//            }
+//        }
+//        Command::Keys(pattern_string) => {
+//            let pattern = Regex::new(&pattern_string)?;
+//            let admin_handle = ADMIN.lock().await;
+//            let string_data_arc = admin_handle.get_string_data_map();
+//            drop(admin_handle);
+//            let string_data_handle = string_data_arc.lock().await;
+//            let mut res = vec![];
+//
+//            for key in string_data_handle.keys() {
+//                if pattern.is_match(key) {
+//                    res.push(key);
+//                }
+//            }
+//
+//            let mut reply_string = format!("*{}\r\n", res.len());
+//            for matched_key in res.into_iter() {
+//                reply_string += format!("${}\r\n{}\r\n", matched_key.len(), matched_key).as_str();
+//            }
+//
+//            writer.write_all(reply_string.as_bytes()).await?;
+//        }
+//        Command::Incr(key) => {
+//            let admin_handle = ADMIN.lock().await;
+//            let string_data_arc = admin_handle.get_string_data_map();
+//            drop(admin_handle);
+//
+//            let mut string_data_handle = string_data_arc.lock().await;
+//            //let a = string_data_handle.get_mut(&key);
+//
+//            let data = string_data_handle
+//                .entry(key)
+//                .or_insert(StringData::new("0".to_string(), None));
+//            let num_str = data.get_data();
+//            match num_str.parse::<i64>() {
+//                Ok(mut num) => {
+//                    if num < i64::MAX {
+//                        num += 1;
+//                    }
+//
+//                    data.set_data(format!("{}", num));
+//                    writer.write_all(format!(":{}\r\n", num).as_bytes()).await?;
+//                }
+//                Err(_) => {
+//                    writer
+//                        .write_all(b"-ERR value is not an integer or out of range\r\n")
+//                        .await?;
+//                }
+//            }
+//        }
+//        _ => {}
+//    }
+//
+//    Ok(())
+//}

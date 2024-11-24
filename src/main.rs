@@ -275,7 +275,6 @@ async fn execute_multi_commands(commands: Vec<Command>, is_multi: bool) -> Strin
                 }
             }
             Command::Keys(pattern_string) => {
-                dbg!(&pattern_string);
                 let pattern = Regex::new(&pattern_string);
                 if pattern.is_err() {
                     res += "-ERR Invalid Regex Format";
@@ -295,7 +294,7 @@ async fn execute_multi_commands(commands: Vec<Command>, is_multi: bool) -> Strin
                     }
                 }
 
-                let mut reply_string = format!("*{}\r\n", res.len());
+                let mut reply_string = format!("*{}\r\n", res_vec.len());
                 for matched_key in res_vec.into_iter() {
                     reply_string +=
                         format!("${}\r\n{}\r\n", matched_key.len(), matched_key).as_str();

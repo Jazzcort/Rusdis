@@ -340,7 +340,7 @@ async fn execute_multi_commands(commands: Vec<Command>, is_multi: bool) -> Strin
                     match section {
                         InfoSection::Replication => {
                             let role_handle = ROLE.lock().await;
-                            let role = role_handle.clone() + "\n";
+                            let role = format!("role:{}", role_handle.clone()) + "\n";
                             string += role.as_str();
                             cnt += role.len();
                         }

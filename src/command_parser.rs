@@ -16,11 +16,17 @@ pub enum Command {
     Multi,
     Exec,
     Discard,
+    Info(Vec<InfoSection>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ConfigSubcommand {
     Get(ConfigGetOption),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum InfoSection {
+    Replication,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -56,6 +62,7 @@ pub fn parse_command(value_vec: Vec<Value>) -> Result<Command, RusdisError> {
             "MULTI" => Ok(Command::Multi),
             "EXEC" => Ok(Command::Exec),
             "DISCARD" => Ok(Command::Discard),
+            "INFO" => parse_info_command(value_iter),
             _ => Err(RusdisError::CommandParserError {
                 msg: "Unrecognized command".to_string(),
             }),
@@ -65,6 +72,28 @@ pub fn parse_command(value_vec: Vec<Value>) -> Result<Command, RusdisError> {
             msg: "Invalid command format".to_string(),
         })
     }
+}
+
+fn parse_info_command(mut iter: impl Iterator<Item = Value>) -> Result<Command, RusdisError> {
+    let mut sections = vec![];
+
+    while let Some(value) = iter.next() {
+        if let Value::BulkString(s) = value {
+            let s = s.to_uppercase();
+            match s.as_str() {
+                "REPLICATION" => {
+                    sections.push(InfoSection::Replication);
+                }
+                _ => {}
+            }
+        } else {
+            return Err(RusdisError::CommandParserError {
+                msg: "Not Bulk String in command".to_string(),
+            });
+        }
+    }
+
+    Ok(Command::Info(sections))
 }
 
 fn parse_incr_command(mut iter: impl Iterator<Item = Value>) -> Result<Command, RusdisError> {

@@ -12,7 +12,7 @@ use crate::error::RusdisError;
 use crate::parser::{parse, ParserError, Value};
 use crate::rdb_file_reader::read_rdb;
 use clap::Parser;
-use command_parser::{ConfigGetOption, ConfigSubcommand};
+use command_parser::{ConfigGetOption, ConfigSubcommand, InfoSection};
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::{HashMap, VecDeque};
@@ -150,7 +150,7 @@ async fn handle_commands(mut stream: TcpStream) -> Result<(), RusdisError> {
                             continue;
                         }
 
-                        let reply_string = execute_multi_commands(queue).await;
+                        let reply_string = execute_multi_commands(queue, true).await;
                         queue = vec![];
                         is_multi = false;
                         writer.write_all(reply_string.as_bytes()).await;
@@ -167,7 +167,9 @@ async fn handle_commands(mut stream: TcpStream) -> Result<(), RusdisError> {
                     }
                     other => {
                         if !is_multi {
-                            execute_commands(other, &mut writer).await;
+                            //execute_commands(other, &mut writer).await;
+                            let reply_string = execute_multi_commands(vec![other], false).await;
+                            writer.write_all(reply_string.as_bytes()).await;
                         } else {
                             queue.push(other);
                             writer.write_all(b"+QUEUED\r\n").await;
@@ -181,9 +183,11 @@ async fn handle_commands(mut stream: TcpStream) -> Result<(), RusdisError> {
     Ok(())
 }
 
-async fn execute_multi_commands(commands: Vec<Command>) -> String {
-    let length = commands.len();
-    let mut res = format!("*{}\r\n", length);
+async fn execute_multi_commands(commands: Vec<Command>, is_multi: bool) -> String {
+    let mut res = String::new();
+    if is_multi {
+        res = format!("*{}\r\n", commands.len());
+    }
 
     for cmd in commands.into_iter() {
         match cmd {
@@ -322,6 +326,24 @@ async fn execute_multi_commands(commands: Vec<Command>) -> String {
                         res += "-ERR value is not an integer or out of range\r\n";
                     }
                 }
+            }
+            Command::Info(sections) => {
+                let mut string = String::new();
+                let mut cnt = 0;
+                for section in sections.into_iter() {
+                    match section {
+                        InfoSection::Replication => {
+                            let role = "role:master\n";
+                            string += role;
+                            cnt += role.len();
+                        }
+                    }
+                }
+                string.pop();
+                cnt -= 1;
+                string += "\r\n";
+                string = format!("${}\r\n", cnt) + string.as_str();
+                res += string.as_str();
             }
             _ => {
                 res += "-ERR not supported command";

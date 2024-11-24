@@ -275,6 +275,7 @@ async fn execute_multi_commands(commands: Vec<Command>, is_multi: bool) -> Strin
                 }
             }
             Command::Keys(pattern_string) => {
+                dbg!(&pattern_string);
                 let pattern = Regex::new(&pattern_string);
                 if pattern.is_err() {
                     res += "-ERR Invalid Regex Format";

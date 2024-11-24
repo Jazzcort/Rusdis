@@ -87,7 +87,13 @@ async fn main() -> Result<(), RusdisError> {
 
     // Uncomment this block to pass the first stage
     //
-    let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
+    let port = match args.port {
+        Some(s) => s.parse::<u16>().unwrap(),
+        None => 6379,
+    };
+    let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
+        .await
+        .unwrap();
     //
 
     loop {

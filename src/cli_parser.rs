@@ -10,4 +10,8 @@ pub struct Args {
     /// Name of the RDB file
     #[arg(long)]
     pub dbfilename: Option<String>,
+
+    /// Port number to listen to
+    #[arg(long)]
+    pub port: Option<String>,
 }

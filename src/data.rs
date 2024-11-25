@@ -1,8 +1,57 @@
 use crate::rdb_file_reader::{Dataset, ValueType};
+use crate::utils::generate_random_string;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::sync::Mutex;
+
+#[derive(Debug, Clone)]
+pub struct ReplicationInfo {
+    role: ReplicaRole,
+    master_replid: String,
+    master_repl_offset: u64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ReplicaRole {
+    Master,
+    Slave,
+}
+
+impl ReplicationInfo {
+    pub fn new() -> Self {
+        ReplicationInfo {
+            role: ReplicaRole::Master,
+            master_replid: generate_random_string(40),
+            master_repl_offset: 0,
+        }
+    }
+
+    pub fn get_role(&self) -> ReplicaRole {
+        self.role.clone()
+    }
+
+    pub fn get_master_replid(&self) -> &String {
+        &self.master_replid
+    }
+
+    pub fn get_master_repl_offset(&self) -> u64 {
+        self.master_repl_offset
+    }
+
+    pub fn change_role(&mut self, new_role: ReplicaRole) {
+        self.role = new_role
+    }
+
+    pub fn set_master_replid(&mut self, id: String) {
+        self.master_replid = id
+    }
+
+    // Todo: Handle the overflow cases
+    pub fn increment_offset(&mut self, num: u64) {
+        self.master_repl_offset += num
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct StringData {

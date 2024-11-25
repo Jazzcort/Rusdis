@@ -4,10 +4,11 @@ mod data;
 mod error;
 mod parser;
 mod rdb_file_reader;
+mod utils;
 
 use crate::cli_parser::Args;
 use crate::command_parser::{parse_command, Command};
-use crate::data::{Admin, Database, StringData};
+use crate::data::{Admin, Database, ReplicaRole, ReplicationInfo, StringData};
 use crate::error::RusdisError;
 use crate::parser::{parse, ParserError, Value};
 use crate::rdb_file_reader::read_rdb;
@@ -31,7 +32,7 @@ lazy_static! {
     static ref ADMIN: Arc<Mutex<Admin>> = Arc::new(Mutex::new(Admin::new(vec![])));
     static ref DIR: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     static ref DBFILENAME: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-    static ref ROLE: Arc<Mutex<String>> = Arc::new(Mutex::new(String::from("master")));
+    static ref REPLICATION_INFO: Arc<Mutex<ReplicationInfo>> = Arc::new(Mutex::new(ReplicationInfo::new()));
 }
 
 #[tokio::main]
@@ -49,8 +50,8 @@ async fn main() -> Result<(), RusdisError> {
     );
 
     if args.replicaof.is_some() {
-        let mut role_handle = ROLE.lock().await;
-        *role_handle = String::from("slave");
+        let mut replication_info_handle = REPLICATION_INFO.lock().await;
+        replication_info_handle.change_role(ReplicaRole::Slave);
     }
 
     let (dir_option, dbfilename_option) = tokio::join!(
@@ -86,7 +87,6 @@ async fn main() -> Result<(), RusdisError> {
     let admin_handle = ADMIN.lock().await;
     let string_data_arc = admin_handle.get_string_data_map();
     drop(admin_handle);
-    dbg!(string_data_arc);
 
     // You can use print statements as follows for debugging, they'll be visible when running tests.
     println!("Logs from your program will appear here!");
@@ -339,10 +339,31 @@ async fn execute_multi_commands(commands: Vec<Command>, is_multi: bool) -> Strin
                 for section in sections.into_iter() {
                     match section {
                         InfoSection::Replication => {
-                            let role_handle = ROLE.lock().await;
-                            let role = format!("role:{}", role_handle.clone()) + "\n";
+                            let replication_info_handle = REPLICATION_INFO.lock().await;
+                            let role = format!(
+                                "role:{}\n",
+                                match replication_info_handle.get_role() {
+                                    ReplicaRole::Master => "master",
+                                    ReplicaRole::Slave => "slave",
+                                }
+                            );
                             string += role.as_str();
                             cnt += role.len();
+
+                            let master_replid = format!(
+                                "master_replid:{}\n",
+                                replication_info_handle.get_master_replid()
+                            );
+                            string += master_replid.as_str();
+                            cnt += master_replid.len();
+
+                            let master_repl_offset = format!(
+                                "master_repl_offset:{}\n",
+                                replication_info_handle.get_master_repl_offset()
+                            );
+
+                            string += master_repl_offset.as_str();
+                            cnt += master_repl_offset.len();
                         }
                     }
                 }

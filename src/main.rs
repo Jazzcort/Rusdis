@@ -348,6 +348,7 @@ async fn execute_multi_commands(commands: Vec<Command>, is_multi: bool) -> Strin
                                 }
                             );
                             string += role.as_str();
+
                             cnt += role.len();
 
                             let master_replid = format!(

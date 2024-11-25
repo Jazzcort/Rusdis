@@ -1,5 +1,5 @@
 use crate::rdb_file_reader::{Dataset, ValueType};
-use crate::utils::generate_random_string;
+//use crate::utils::generate_random_string;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -22,7 +22,7 @@ impl ReplicationInfo {
     pub fn new() -> Self {
         ReplicationInfo {
             role: ReplicaRole::Master,
-            master_replid: generate_random_string(40),
+            master_replid: "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_string(),
             master_repl_offset: 0,
         }
     }

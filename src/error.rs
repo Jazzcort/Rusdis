@@ -19,4 +19,6 @@ pub enum RusdisError {
     RDBFileParserError { msg: String },
     #[error("Regex Error")]
     RegexError(#[from] regex::Error),
+    #[error("Master Connection Error: {msg}")]
+    MasterConnectionError { msg: String },
 }

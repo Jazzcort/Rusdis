@@ -22,13 +22,14 @@ use std::time::{Duration, SystemTime};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::tcp::WriteHalf;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 use tokio::task;
 
 lazy_static! {
     //static ref START_WITH_SPECIAL: Regex = Regex::new(r#"^([\+-:$\*_#,=\(!%`>~])"#).unwrap();
     //static ref ARRAY_STRUCT: Regex = Regex::new(r#"^*"#).unwrap();
     //static ref BULK_STRING_STRUCT: Regex = Regex::new(r#"^$"#).unwrap();
+    static ref ARGS: RwLock<Args> = RwLock::new(Args::new());
     static ref ADMIN: Arc<Mutex<Admin>> = Arc::new(Mutex::new(Admin::new(vec![])));
     static ref DIR: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     static ref DBFILENAME: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
@@ -38,18 +39,21 @@ lazy_static! {
 #[tokio::main]
 async fn main() -> Result<(), RusdisError> {
     let args = Args::parse();
-    tokio::join!(
-        async {
-            let mut dir_handle = DIR.lock().await;
-            *dir_handle = args.dir.clone();
-        },
-        async {
-            let mut dbfilename_handle = DBFILENAME.lock().await;
-            *dbfilename_handle = args.dbfilename.clone();
-        },
-    );
+    let mut args_writer = ARGS.write().await;
+    *args_writer = args;
+    drop(args_writer);
+    //tokio::join!(
+    //    async {
+    //        let mut dir_handle = DIR.lock().await;
+    //        *dir_handle = args.dir.clone();
+    //    },
+    //    async {
+    //        let mut dbfilename_handle = DBFILENAME.lock().await;
+    //        *dbfilename_handle = args.dbfilename.clone();
+    //    },
+    //);
 
-    match args.replicaof {
+    match ARGS.read().await.replicaof.clone() {
         Some(s) => {
             let mut replication_info_handle = REPLICATION_INFO.lock().await;
             replication_info_handle.change_role(ReplicaRole::Slave);
@@ -76,12 +80,16 @@ async fn main() -> Result<(), RusdisError> {
 
     let (dir_option, dbfilename_option) = tokio::join!(
         async {
-            let dir_handle = DIR.lock().await;
-            dir_handle.clone()
+            //let dir_handle = DIR.lock().await;
+            //dir_handle.clone();
+            let args_read = ARGS.read().await;
+            args_read.dir.clone()
         },
         async {
-            let dbfilename_handle = DBFILENAME.lock().await;
-            dbfilename_handle.clone()
+            //let dbfilename_handle = DBFILENAME.lock().await;
+            //dbfilename_handle.clone()
+            let args_read = ARGS.read().await;
+            args_read.dbfilename.clone()
         },
     );
 
@@ -113,7 +121,7 @@ async fn main() -> Result<(), RusdisError> {
 
     // Uncomment this block to pass the first stage
     //
-    let port = match args.port {
+    let port = match ARGS.read().await.port.clone() {
         Some(s) => s.parse::<u16>().unwrap(),
         None => 6379,
     };
@@ -142,6 +150,19 @@ async fn main() -> Result<(), RusdisError> {
 async fn connect_master(mut stream: TcpStream) -> Result<(), RusdisError> {
     let (reader, mut writer) = stream.split();
     let mut reader = BufReader::new(reader);
+
+    let _ = writer.write_all(b"*1\r\n$4\r\nPING\r\n").await;
+    let mut buf = Vec::from(reader.fill_buf().await?);
+    let response = parse(String::from_utf8_lossy(&buf).to_string())?;
+
+    if let Value::SimpleString(r) = response {
+        let r = r.to_uppercase();
+        if r.as_str() != "PONG" {
+            return Err(RusdisError::MasterConnectionError {
+                msg: "Wrong response to ping".to_string(),
+            });
+        }
+    }
 
     let _ = writer.write_all(b"*1\r\n$4\r\nPING\r\n").await;
 

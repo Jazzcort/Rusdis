@@ -19,3 +19,14 @@ pub struct Args {
     #[arg(long)]
     pub replicaof: Option<String>,
 }
+
+impl Args {
+    pub fn new() -> Self {
+        Args {
+            dir: None,
+            dbfilename: None,
+            port: None,
+            replicaof: None,
+        }
+    }
+}

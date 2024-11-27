@@ -38,7 +38,10 @@ lazy_static! {
 
 #[tokio::main]
 async fn main() -> Result<(), RusdisError> {
-    let args = Args::parse();
+    let mut args = Args::parse();
+    if args.port.is_none() {
+        args.port = Some("6379".to_string())
+    }
     let mut args_writer = ARGS.write().await;
     *args_writer = args;
     drop(args_writer);
@@ -119,16 +122,13 @@ async fn main() -> Result<(), RusdisError> {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
     println!("Logs from your program will appear here!");
 
-    // Uncomment this block to pass the first stage
-    //
     let port = match ARGS.read().await.port.clone() {
-        Some(s) => s.parse::<u16>().unwrap(),
-        None => 6379,
+        Some(p) => p,
+        None => "6379".to_string(),
     };
     let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
         .await
         .unwrap();
-    //
 
     loop {
         let res = listener.accept().await;
@@ -164,9 +164,19 @@ async fn connect_master(mut stream: TcpStream) -> Result<(), RusdisError> {
         }
     }
 
+    let port = match ARGS.read().await.port.clone() {
+        Some(p) => p,
+        None => "6379".to_string(),
+    };
+
     let _ = writer
         .write_all(
-            format!("*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n6380\r\n").as_bytes(),
+            format!(
+                "*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n${}\r\n{}\r\n",
+                port.len(),
+                port
+            )
+            .as_bytes(),
         )
         .await;
 

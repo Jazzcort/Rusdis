@@ -165,9 +165,9 @@ async fn connect_master(mut stream: TcpStream) -> Result<(), RusdisError> {
     }
 
     let _ = writer
-        .write_all(format!(
-            "*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n6380\r\n"
-        ))
+        .write_all(
+            format!("*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n6380\r\n").as_bytes(),
+        )
         .await;
 
     Ok(())

@@ -49,9 +49,29 @@ async fn main() -> Result<(), RusdisError> {
         },
     );
 
-    if args.replicaof.is_some() {
-        let mut replication_info_handle = REPLICATION_INFO.lock().await;
-        replication_info_handle.change_role(ReplicaRole::Slave);
+    match args.replicaof {
+        Some(s) => {
+            let mut replication_info_handle = REPLICATION_INFO.lock().await;
+            replication_info_handle.change_role(ReplicaRole::Slave);
+
+            let split_idx = s.find(" ");
+            if split_idx.is_none() {
+                eprintln!("Invalid --replicaif parameters");
+                return Ok(());
+            }
+
+            let (host, port) = s.split_at(split_idx.unwrap());
+            let master_stream = TcpStream::connect(format!("{}:{}", host, port.trim())).await;
+
+            if master_stream.is_err() {
+                eprintln!("Master is offline");
+                return Ok(());
+            }
+
+            let master_stream = master_stream.unwrap();
+            connect_master(master_stream).await?;
+        }
+        None => {}
     }
 
     let (dir_option, dbfilename_option) = tokio::join!(
@@ -117,6 +137,15 @@ async fn main() -> Result<(), RusdisError> {
             }
         }
     }
+}
+
+async fn connect_master(mut stream: TcpStream) -> Result<(), RusdisError> {
+    let (reader, mut writer) = stream.split();
+    let mut reader = BufReader::new(reader);
+
+    let _ = writer.write_all(b"*1\r\n$4\r\nPING\r\n").await;
+
+    Ok(())
 }
 
 async fn handle_commands(mut stream: TcpStream) -> Result<(), RusdisError> {

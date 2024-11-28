@@ -299,8 +299,9 @@ async fn execute_multi_commands(commands: Vec<Command>, is_multi: bool) -> Strin
             Command::Config(subcommand) => match subcommand {
                 ConfigSubcommand::Get(option) => match option {
                     ConfigGetOption::Dir => {
-                        let dir_handle = DIR.lock().await;
-                        let dir_ref = dir_handle.as_ref();
+                        let dir_ref = &ARGS.read().await.dir;
+                        //let dir_handle = DIR.lock().await;
+                        //let dir_ref = dir_handle.as_ref();
                         match dir_ref {
                             Some(dir) => {
                                 res += format!("*2\r\n$3\r\ndir\r\n${}\r\n{}\r\n", dir.len(), dir)
@@ -312,8 +313,9 @@ async fn execute_multi_commands(commands: Vec<Command>, is_multi: bool) -> Strin
                         }
                     }
                     ConfigGetOption::DbFilename => {
-                        let dbfilename_handle = DBFILENAME.lock().await;
-                        let dbfilename_ref = dbfilename_handle.as_ref();
+                        let dbfilename_ref = &ARGS.read().await.dbfilename;
+                        //let dbfilename_handle = DBFILENAME.lock().await;
+                        //let dbfilename_ref = dbfilename_handle.as_ref();
                         match dbfilename_ref {
                             Some(dbfilename) => {
                                 res += format!(

@@ -263,6 +263,24 @@ async fn handle_commands(mut stream: TcpStream, addr: String) -> Result<(), Rusd
 
                             drop(replica_info_read);
 
+                            // Transfer RDB file
+                            let file = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2";
+
+                            let data_slice = file.chars().collect::<Vec<char>>();
+                            let data_vec = data_slice
+                                .chunks(2)
+                                .into_iter()
+                                .map(|a| {
+                                    let x = a.into_iter().collect::<String>();
+                                    u8::from_str_radix(&x, 16).unwrap()
+                                })
+                                .collect::<Vec<u8>>();
+                            let prefix = format!("${}\r\n", data_vec.len());
+                            writer
+                                .write_all(
+                                    [prefix.as_bytes(), data_vec.as_slice()].concat().as_slice(),
+                                )
+                                .await;
                             build_replica_pipe(reader, writer);
                             return Ok(());
                         }

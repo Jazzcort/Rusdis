@@ -20,7 +20,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::tcp::WriteHalf;
+use tokio::net::tcp::{ReadHalf, WriteHalf};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Mutex, RwLock};
 use tokio::task;
@@ -33,7 +33,7 @@ lazy_static! {
     static ref ADMIN: Arc<Mutex<Admin>> = Arc::new(Mutex::new(Admin::new(vec![])));
     static ref DIR: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     static ref DBFILENAME: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-    static ref REPLICATION_INFO: Arc<Mutex<ReplicationInfo>> = Arc::new(Mutex::new(ReplicationInfo::new()));
+    static ref REPLICATION_INFO: Arc<RwLock<ReplicationInfo>> = Arc::new(RwLock::new(ReplicationInfo::new()));
 }
 
 #[tokio::main]
@@ -58,8 +58,9 @@ async fn main() -> Result<(), RusdisError> {
 
     match ARGS.read().await.replicaof.clone() {
         Some(s) => {
-            let mut replication_info_handle = REPLICATION_INFO.lock().await;
+            let mut replication_info_handle = REPLICATION_INFO.write().await;
             replication_info_handle.change_role(ReplicaRole::Slave);
+            drop(replication_info_handle);
 
             let split_idx = s.find(" ");
             if split_idx.is_none() {
@@ -130,10 +131,10 @@ async fn main() -> Result<(), RusdisError> {
         let res = listener.accept().await;
 
         match res {
-            Ok((stream, _)) => {
-                println!("accepted new connection");
+            Ok((stream, addr)) => {
+                println!("accepted new connection: {}", addr.to_string());
                 task::spawn(async move {
-                    handle_commands(stream).await;
+                    handle_commands(stream, addr.to_string()).await;
                 });
             }
             Err(e) => {
@@ -217,7 +218,7 @@ async fn connect_master(mut stream: TcpStream) -> Result<(), RusdisError> {
     Ok(())
 }
 
-async fn handle_commands(mut stream: TcpStream) -> Result<(), RusdisError> {
+async fn handle_commands(mut stream: TcpStream, addr: String) -> Result<(), RusdisError> {
     let (reader, mut writer) = stream.split();
     let mut reader = BufReader::new(reader);
     let mut is_multi = false;
@@ -244,6 +245,38 @@ async fn handle_commands(mut stream: TcpStream) -> Result<(), RusdisError> {
                 let cmd = cmd.unwrap();
 
                 match cmd {
+                    Command::Psync { id, offset } => match id {
+                        Some(master_id) => {}
+                        None => {
+                            let replica_info_read = REPLICATION_INFO.read().await;
+                            let (master_id, cur_offset) = (
+                                replica_info_read.get_master_replid(),
+                                replica_info_read.get_master_repl_offset(),
+                            );
+
+                            writer
+                                .write_all(
+                                    format!("+FULLRESYNC {} {}\r\n", master_id, cur_offset)
+                                        .as_bytes(),
+                                )
+                                .await;
+
+                            drop(replica_info_read);
+
+                            build_replica_pipe(reader, writer);
+                            return Ok(());
+                        }
+                    },
+                    Command::Replconf(subcommand) => match subcommand {
+                        ReplconfSubcommand::ListeningPort(port) => {
+                            // Store the replica's port
+                            writer.write_all(b"+OK\r\n").await;
+                        }
+                        ReplconfSubcommand::Capa(options) => {
+                            // Configure capa?
+                            writer.write_all(b"+OK\r\n").await;
+                        }
+                    },
                     Command::Multi => {
                         is_multi = true;
                         writer.write_all(b"+OK\r\n").await;
@@ -286,6 +319,8 @@ async fn handle_commands(mut stream: TcpStream) -> Result<(), RusdisError> {
     }
     Ok(())
 }
+
+fn build_replica_pipe(mut reader: BufReader<ReadHalf<'_>>, mut writer: WriteHalf<'_>) {}
 
 async fn execute_multi_commands(commands: Vec<Command>, is_multi: bool) -> String {
     let mut res = String::new();
@@ -435,7 +470,7 @@ async fn execute_multi_commands(commands: Vec<Command>, is_multi: bool) -> Strin
                 for section in sections.into_iter() {
                     match section {
                         InfoSection::Replication => {
-                            let replication_info_handle = REPLICATION_INFO.lock().await;
+                            let replication_info_handle = REPLICATION_INFO.read().await;
                             let role = format!(
                                 "role:{}\n",
                                 match replication_info_handle.get_role() {

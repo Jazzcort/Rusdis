@@ -18,6 +18,10 @@ pub enum Command {
     Discard,
     Info(Vec<InfoSection>),
     Replconf(ReplconfSubcommand),
+    Psync {
+        id: Option<String>,
+        offset: Option<u64>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -77,6 +81,7 @@ pub fn parse_command(value_vec: Vec<Value>) -> Result<Command, RusdisError> {
             "DISCARD" => Ok(Command::Discard),
             "INFO" => parse_info_command(value_iter),
             "REPLCONF" => parse_replconf_command(value_iter),
+            "PSYNC" => parse_psync_command(value_iter),
             _ => Err(RusdisError::CommandParserError {
                 msg: "Unrecognized command".to_string(),
             }),
@@ -85,6 +90,32 @@ pub fn parse_command(value_vec: Vec<Value>) -> Result<Command, RusdisError> {
         Err(RusdisError::CommandParserError {
             msg: "Invalid command format".to_string(),
         })
+    }
+}
+
+fn parse_psync_command(mut iter: impl Iterator<Item = Value>) -> Result<Command, RusdisError> {
+    match (iter.next(), iter.next()) {
+        (Some(id_value), Some(offset_value)) => match (id_value, offset_value) {
+            (Value::BulkString(id_string), Value::BulkString(offset_string)) => {
+                Ok(Command::Psync {
+                    id: if id_string.len() != 40 {
+                        None
+                    } else {
+                        Some(id_string)
+                    },
+                    offset: match offset_string.parse::<u64>() {
+                        Ok(offset) => Some(offset),
+                        Err(_) => None,
+                    },
+                })
+            }
+            _ => Err(RusdisError::CommandParserError {
+                msg: "Not Bulk String in command".to_string(),
+            }),
+        },
+        _ => Err(RusdisError::CommandParserError {
+            msg: "Missing parameters in PSYNC command".to_string(),
+        }),
     }
 }
 

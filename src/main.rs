@@ -7,7 +7,7 @@ mod rdb_file_reader;
 mod utils;
 
 use crate::cli_parser::Args;
-use crate::command_parser::{parse_command, Command};
+use crate::command_parser::{parse_command, Command, ReplconfSubcommand};
 use crate::data::{Admin, Database, ReplicaRole, ReplicationInfo, StringData};
 use crate::error::RusdisError;
 use crate::parser::{parse, ParserError, Value};
@@ -470,6 +470,16 @@ async fn execute_multi_commands(commands: Vec<Command>, is_multi: bool) -> Strin
                 string = format!("${}\r\n", cnt) + string.as_str();
                 res += string.as_str();
             }
+            Command::Replconf(subcommand) => match subcommand {
+                ReplconfSubcommand::ListeningPort(port) => {
+                    // Store the replica's port
+                    res += "+OK\r\n";
+                }
+                ReplconfSubcommand::Capa(options) => {
+                    // Configure capa?
+                    res += "+OK\r\n";
+                }
+            },
             _ => {
                 res += "-ERR not supported command";
             }

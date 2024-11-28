@@ -17,6 +17,19 @@ pub enum Command {
     Exec,
     Discard,
     Info(Vec<InfoSection>),
+    Replconf(ReplconfSubcommand),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ReplconfSubcommand {
+    ListeningPort(u16),
+    Capa(Vec<CapaOption>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CapaOption {
+    Eof,
+    Psync2,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -63,6 +76,7 @@ pub fn parse_command(value_vec: Vec<Value>) -> Result<Command, RusdisError> {
             "EXEC" => Ok(Command::Exec),
             "DISCARD" => Ok(Command::Discard),
             "INFO" => parse_info_command(value_iter),
+            "REPLCONF" => parse_replconf_command(value_iter),
             _ => Err(RusdisError::CommandParserError {
                 msg: "Unrecognized command".to_string(),
             }),
@@ -71,6 +85,82 @@ pub fn parse_command(value_vec: Vec<Value>) -> Result<Command, RusdisError> {
         Err(RusdisError::CommandParserError {
             msg: "Invalid command format".to_string(),
         })
+    }
+}
+
+fn parse_replconf_command(mut iter: impl Iterator<Item = Value>) -> Result<Command, RusdisError> {
+    let subcommand_bulk_string = iter.next();
+    if subcommand_bulk_string.is_none() {
+        return Err(RusdisError::CommandParserError {
+            msg: "No subcommand after REPLCONF".to_string(),
+        });
+    }
+    let subcommand_bulk_string = subcommand_bulk_string.unwrap();
+
+    match subcommand_bulk_string {
+        Value::BulkString(subcommand) => {
+            let subcommand = subcommand.to_uppercase();
+            match subcommand.as_str() {
+                "LISTENING-PORT" => Ok(Command::Replconf(parse_replconf_listening_port_command(
+                    iter,
+                )?)),
+                "CAPA" => Ok(Command::Replconf(parse_replconf_capa_command(iter)?)),
+                _ => Err(RusdisError::CommandParserError {
+                    msg: "Invalid REPLCONF subcommand".to_string(),
+                }),
+            }
+        }
+        _ => Err(RusdisError::CommandParserError {
+            msg: "Not Bulk String in command".to_string(),
+        }),
+    }
+}
+
+fn parse_replconf_capa_command(
+    mut iter: impl Iterator<Item = Value>,
+) -> Result<ReplconfSubcommand, RusdisError> {
+    let mut options = vec![];
+    while let Some(value) = iter.next() {
+        if let Value::BulkString(s) = value {
+            let s = s.to_uppercase();
+            match s.as_str() {
+                "EOF" => options.push(CapaOption::Eof),
+                "PSYNC2" => options.push(CapaOption::Psync2),
+                _ => {}
+            }
+        } else {
+            return Err(RusdisError::CommandParserError {
+                msg: "Not Bulk String in command".to_string(),
+            });
+        }
+    }
+
+    if options.len() == 0 {
+        return Err(RusdisError::CommandParserError {
+            msg: "No options after capa".to_string(),
+        });
+    }
+
+    Ok(ReplconfSubcommand::Capa(options))
+}
+
+fn parse_replconf_listening_port_command(
+    mut iter: impl Iterator<Item = Value>,
+) -> Result<ReplconfSubcommand, RusdisError> {
+    match iter.next() {
+        Some(p_bulk_string) => {
+            if let Value::BulkString(p) = p_bulk_string {
+                let port = p.parse::<u16>()?;
+                Ok(ReplconfSubcommand::ListeningPort(port))
+            } else {
+                Err(RusdisError::CommandParserError {
+                    msg: "Not Bulk String in command".to_string(),
+                })
+            }
+        }
+        None => Err(RusdisError::CommandParserError {
+            msg: "REPLCONF listening-port without port parameter".to_string(),
+        }),
     }
 }
 

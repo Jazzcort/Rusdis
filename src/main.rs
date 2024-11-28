@@ -39,9 +39,9 @@ lazy_static! {
 #[tokio::main]
 async fn main() -> Result<(), RusdisError> {
     let mut args = Args::parse();
-    if args.port.is_none() {
-        args.port = Some("6379".to_string())
-    }
+    //if args.port.is_none() {
+    //    args.port = Some("6379".to_string())
+    //}
     let mut args_writer = ARGS.write().await;
     *args_writer = args;
     drop(args_writer);
@@ -83,14 +83,10 @@ async fn main() -> Result<(), RusdisError> {
 
     let (dir_option, dbfilename_option) = tokio::join!(
         async {
-            //let dir_handle = DIR.lock().await;
-            //dir_handle.clone();
             let args_read = ARGS.read().await;
             args_read.dir.clone()
         },
         async {
-            //let dbfilename_handle = DBFILENAME.lock().await;
-            //dbfilename_handle.clone()
             let args_read = ARGS.read().await;
             args_read.dbfilename.clone()
         },
@@ -151,11 +147,11 @@ async fn connect_master(mut stream: TcpStream) -> Result<(), RusdisError> {
     let (reader, mut writer) = stream.split();
     let mut reader = BufReader::new(reader);
 
+    // PING Master
     writer.write_all(b"*1\r\n$4\r\nPING\r\n").await?;
     let buf = Vec::from(reader.fill_buf().await?);
     reader.consume(buf.len());
     let response = parse(String::from_utf8_lossy(&buf).to_string())?;
-
     if let Value::SimpleString(r) = response {
         let r = r.to_uppercase();
         if r.as_str() != "PONG" {
@@ -170,6 +166,7 @@ async fn connect_master(mut stream: TcpStream) -> Result<(), RusdisError> {
         None => "6379".to_string(),
     };
 
+    // REPLCONF listening-port
     writer
         .write_all(
             format!(
@@ -180,7 +177,6 @@ async fn connect_master(mut stream: TcpStream) -> Result<(), RusdisError> {
             .as_bytes(),
         )
         .await?;
-
     let buf = Vec::from(reader.fill_buf().await?);
     reader.consume(buf.len());
     let response = parse(String::from_utf8_lossy(&buf).to_string())?;
@@ -193,6 +189,7 @@ async fn connect_master(mut stream: TcpStream) -> Result<(), RusdisError> {
         }
     }
 
+    // REPLCONF capa
     writer
         .write_all(b"*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n")
         .await?;
@@ -208,6 +205,14 @@ async fn connect_master(mut stream: TcpStream) -> Result<(), RusdisError> {
             });
         }
     }
+
+    writer
+        .write_all(b"*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n")
+        .await?;
+    let buf = Vec::from(reader.fill_buf().await?);
+    reader.consume(buf.len());
+    let response = parse(String::from_utf8_lossy(&buf).to_string())?;
+    dbg!(response);
 
     Ok(())
 }
@@ -300,8 +305,6 @@ async fn execute_multi_commands(commands: Vec<Command>, is_multi: bool) -> Strin
                 ConfigSubcommand::Get(option) => match option {
                     ConfigGetOption::Dir => {
                         let dir_ref = &ARGS.read().await.dir;
-                        //let dir_handle = DIR.lock().await;
-                        //let dir_ref = dir_handle.as_ref();
                         match dir_ref {
                             Some(dir) => {
                                 res += format!("*2\r\n$3\r\ndir\r\n${}\r\n{}\r\n", dir.len(), dir)
@@ -314,8 +317,6 @@ async fn execute_multi_commands(commands: Vec<Command>, is_multi: bool) -> Strin
                     }
                     ConfigGetOption::DbFilename => {
                         let dbfilename_ref = &ARGS.read().await.dbfilename;
-                        //let dbfilename_handle = DBFILENAME.lock().await;
-                        //let dbfilename_ref = dbfilename_handle.as_ref();
                         match dbfilename_ref {
                             Some(dbfilename) => {
                                 res += format!(

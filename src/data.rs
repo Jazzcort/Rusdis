@@ -190,7 +190,7 @@ mod test {
         };
 
         let datasets = vec![d1, d2];
-        let mut admin = Admin::new(Some(datasets));
+        let mut admin = Admin::new(datasets);
         admin.select_database(1);
     }
 }

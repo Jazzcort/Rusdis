@@ -12,6 +12,7 @@ use crate::data::{Admin, Database, ReplicaRole, ReplicationInfo, StringData};
 use crate::error::RusdisError;
 use crate::parser::{parse, ParserError, Value};
 use crate::rdb_file_reader::read_rdb;
+use crate::utils::generate_resp;
 use clap::Parser;
 use command_parser::{ConfigGetOption, ConfigSubcommand, InfoSection};
 use lazy_static::lazy_static;
@@ -22,6 +23,7 @@ use std::time::{Duration, SystemTime};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::tcp::{ReadHalf, WriteHalf};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::broadcast::{channel, Sender};
 use tokio::sync::{Mutex, RwLock};
 use tokio::task;
 
@@ -29,6 +31,8 @@ lazy_static! {
     //static ref START_WITH_SPECIAL: Regex = Regex::new(r#"^([\+-:$\*_#,=\(!%`>~])"#).unwrap();
     //static ref ARRAY_STRUCT: Regex = Regex::new(r#"^*"#).unwrap();
     //static ref BULK_STRING_STRUCT: Regex = Regex::new(r#"^$"#).unwrap();
+    static ref SLAVES_COUNT: RwLock<usize> = RwLock::new(0);
+    static ref BROADCAST_CHANNEL: Sender<String> = channel(100).0;
     static ref ARGS: RwLock<Args> = RwLock::new(Args::new());
     static ref ADMIN: Arc<Mutex<Admin>> = Arc::new(Mutex::new(Admin::new(vec![])));
     static ref DIR: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
@@ -215,6 +219,33 @@ async fn connect_master(mut stream: TcpStream) -> Result<(), RusdisError> {
     let response = parse(String::from_utf8_lossy(&buf).to_string())?;
     dbg!(response);
 
+    let buf = Vec::from(reader.fill_buf().await?);
+
+    tokio::spawn(async move {
+        let (reader, mut writer) = stream.split();
+        let mut reader = BufReader::new(reader);
+        loop {
+            if let Ok(buf) = reader.fill_buf().await {
+                let buf = Vec::from(buf);
+                if buf.len() == 0 {
+                    break;
+                }
+                reader.consume(buf.len());
+                let commands = String::from_utf8_lossy(&buf).to_string();
+                // wrong protocol: need to disconnect
+                let value = parse(commands);
+
+                if let Ok(Value::Array(bulk_string_vec)) = value {
+                    let parse_res = parse_command(bulk_string_vec);
+
+                    if let Ok(cmd) = parse_res {
+                        execute_multi_commands(vec![cmd], false).await;
+                    }
+                }
+            }
+        }
+    });
+
     Ok(())
 }
 
@@ -281,7 +312,7 @@ async fn handle_commands(mut stream: TcpStream, addr: String) -> Result<(), Rusd
                                     [prefix.as_bytes(), data_vec.as_slice()].concat().as_slice(),
                                 )
                                 .await;
-                            build_replica_pipe(reader, writer);
+                            build_replica_pipe(stream);
                             return Ok(());
                         }
                     },
@@ -338,7 +369,30 @@ async fn handle_commands(mut stream: TcpStream, addr: String) -> Result<(), Rusd
     Ok(())
 }
 
-fn build_replica_pipe(mut reader: BufReader<ReadHalf<'_>>, mut writer: WriteHalf<'_>) {}
+fn build_replica_pipe(mut stream: TcpStream) {
+    let mut rx = BROADCAST_CHANNEL.subscribe();
+    tokio::spawn(async move {
+        let (reader, mut writer) = stream.split();
+        let mut reader = BufReader::new(reader);
+        let mut slaves_count_write = SLAVES_COUNT.write().await;
+        *slaves_count_write += 1;
+        drop(slaves_count_write);
+        loop {
+            tokio::select! {
+                result = rx.recv() => {
+                    if let Ok(cmd) = result {
+                        dbg!(&cmd);
+
+                        writer.write_all(cmd.as_bytes()).await;
+                    }
+                }
+            }
+        }
+
+        let mut slaves_count_write = SLAVES_COUNT.write().await;
+        *slaves_count_write -= 1;
+    });
+}
 
 async fn execute_multi_commands(commands: Vec<Command>, is_multi: bool) -> String {
     let mut res = String::new();
@@ -405,8 +459,15 @@ async fn execute_multi_commands(commands: Vec<Command>, is_multi: bool) -> Strin
                 let string_data_arc = admin_handle.get_string_data_map();
                 drop(admin_handle);
                 let mut string_data_handle = string_data_arc.lock().await;
-                let _ = string_data_handle.insert(key, StringData::new(value, expiration));
+                let _ = string_data_handle
+                    .insert(key.clone(), StringData::new(value.clone(), expiration));
                 res += "+OK\r\n";
+
+                if REPLICATION_INFO.read().await.get_role() == ReplicaRole::Master
+                    && *SLAVES_COUNT.read().await != 0
+                {
+                    let _ = BROADCAST_CHANNEL.send(generate_resp(Command::Set { key, value, px }));
+                }
             }
             Command::Get(key) => {
                 let admin_handle = ADMIN.lock().await;
@@ -523,16 +584,16 @@ async fn execute_multi_commands(commands: Vec<Command>, is_multi: bool) -> Strin
                 string = format!("${}\r\n", cnt) + string.as_str();
                 res += string.as_str();
             }
-            Command::Replconf(subcommand) => match subcommand {
-                ReplconfSubcommand::ListeningPort(port) => {
-                    // Store the replica's port
-                    res += "+OK\r\n";
-                }
-                ReplconfSubcommand::Capa(options) => {
-                    // Configure capa?
-                    res += "+OK\r\n";
-                }
-            },
+            //Command::Replconf(subcommand) => match subcommand {
+            //    ReplconfSubcommand::ListeningPort(port) => {
+            //        // Store the replica's port
+            //        res += "+OK\r\n";
+            //    }
+            //    ReplconfSubcommand::Capa(options) => {
+            //        // Configure capa?
+            //        res += "+OK\r\n";
+            //    }
+            //},
             _ => {
                 res += "-ERR not supported command";
             }

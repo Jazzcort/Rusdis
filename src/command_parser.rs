@@ -5,7 +5,7 @@ pub enum Command {
     Set {
         key: String,
         value: String,
-        px: Option<usize>,
+        px: Option<u64>,
     },
     Get(String),
     Ping,
@@ -333,7 +333,7 @@ fn parse_set_command(mut iter: impl Iterator<Item = Value>) -> Result<Command, R
     match (iter.next(), iter.next()) {
         (Some(key_v), Some(value_v)) => match (key_v, value_v) {
             (Value::BulkString(key), Value::BulkString(value)) => {
-                let mut px: Option<usize> = None;
+                let mut px: Option<u64> = None;
 
                 while let Some(v) = iter.next() {
                     if let Value::BulkString(s) = v {
@@ -346,7 +346,7 @@ fn parse_set_command(mut iter: impl Iterator<Item = Value>) -> Result<Command, R
                                 match value_px {
                                     Some(mil_sec_bulk_str) => {
                                         if let Value::BulkString(mil_sec_str) = mil_sec_bulk_str {
-                                            let mil_sec = mil_sec_str.parse::<usize>()?;
+                                            let mil_sec = mil_sec_str.parse::<u64>()?;
                                             px = Some(mil_sec);
                                         } else {
                                             return Err(RusdisError::CommandParserError {

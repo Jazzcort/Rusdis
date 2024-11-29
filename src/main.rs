@@ -10,7 +10,7 @@ use crate::cli_parser::Args;
 use crate::command_parser::{parse_command, Command, ReplconfSubcommand};
 use crate::data::{Admin, Database, ReplicaRole, ReplicationInfo, StringData};
 use crate::error::RusdisError;
-use crate::parser::{parse, ParserError, Value};
+use crate::parser::{parse, parse_multi_array, ParserError, Value};
 use crate::rdb_file_reader::read_rdb;
 use crate::utils::generate_resp;
 use clap::Parser;
@@ -18,6 +18,9 @@ use command_parser::{ConfigGetOption, ConfigSubcommand, InfoSection};
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::{HashMap, VecDeque};
+use std::fs::File;
+use std::io::prelude::*;
+use std::iter::Peekable;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -99,17 +102,25 @@ async fn main() -> Result<(), RusdisError> {
 
     match (dir_option, dbfilename_option) {
         (Some(dir), Some(dbfilename)) => {
-            let res = read_rdb(dir + "/" + &dbfilename);
-            match res {
-                Ok(rdb_file) => {
-                    dbg!(&rdb_file.datasets);
-                    let new_admin = Admin::new(rdb_file.datasets);
+            let f = File::open(dir + "/" + &dbfilename);
+            if let Ok(f) = f {
+                let mut reader = std::io::BufReader::new(f);
+                let mut buf = vec![];
+                let _length = reader.read_to_end(&mut buf)?;
+                let iter = buf.into_iter().peekable();
 
-                    let mut admin_handle = ADMIN.lock().await;
-                    *admin_handle = new_admin;
-                }
-                Err(e) => {
-                    dbg!(e);
+                let res = read_rdb(iter);
+                match res {
+                    Ok(rdb_file) => {
+                        dbg!(&rdb_file.datasets);
+                        let new_admin = Admin::new(rdb_file.datasets);
+
+                        let mut admin_handle = ADMIN.lock().await;
+                        *admin_handle = new_admin;
+                    }
+                    Err(e) => {
+                        dbg!(e);
+                    }
                 }
             }
         }
@@ -220,6 +231,15 @@ async fn connect_master(mut stream: TcpStream) -> Result<(), RusdisError> {
     dbg!(response);
 
     let buf = Vec::from(reader.fill_buf().await?);
+    reader.consume(buf.len());
+    let idx = buf.iter().position(|&x| x == '\n' as u8);
+    if idx.is_some() {
+        let idx = idx.unwrap();
+        let file_buf = Vec::from(&buf[idx + 1..]);
+
+        let rdb_file = read_rdb(file_buf.into_iter().peekable());
+        dbg!(rdb_file);
+    }
 
     tokio::spawn(async move {
         let (reader, mut writer) = stream.split();
@@ -232,14 +252,17 @@ async fn connect_master(mut stream: TcpStream) -> Result<(), RusdisError> {
                 }
                 reader.consume(buf.len());
                 let commands = String::from_utf8_lossy(&buf).to_string();
-                // wrong protocol: need to disconnect
-                let value = parse(commands);
+                dbg!(&commands);
+                let parse_res = parse_multi_array(commands);
 
-                if let Ok(Value::Array(bulk_string_vec)) = value {
-                    let parse_res = parse_command(bulk_string_vec);
-
-                    if let Ok(cmd) = parse_res {
-                        execute_multi_commands(vec![cmd], false).await;
+                if let Ok(array_vec) = parse_res {
+                    for value in array_vec.into_iter() {
+                        if let Value::Array(bulk_string_vec) = value {
+                            let parse_res = parse_command(bulk_string_vec);
+                            if let Ok(cmd) = parse_res {
+                                execute_multi_commands(vec![cmd], false).await;
+                            }
+                        }
                     }
                 }
             }

@@ -20,6 +20,29 @@ pub enum Value {
     Null,
 }
 
+pub fn parse_multi_array(protocol: String) -> Result<Vec<Value>, ParserError> {
+    let mut first = true;
+    let mut res_vec = vec![];
+    let mut pre = 0;
+
+    for (idx, c) in protocol.chars().enumerate() {
+        if c == '*' {
+            if first {
+                first = false;
+            } else {
+                res_vec.push(parse((&protocol[pre..idx]).to_string())?);
+                pre = idx;
+            }
+        }
+
+        if idx == protocol.len() - 1 {
+            res_vec.push(parse((&protocol[pre..]).to_string())?);
+        }
+    }
+
+    Ok(res_vec)
+}
+
 pub fn parse(protocol: String) -> Result<Value, ParserError> {
     let symbol = protocol.chars().nth(0);
 
@@ -307,5 +330,34 @@ mod test {
 
         let res = res.unwrap();
         assert_eq!(res, Value::BulkString("".to_string()));
+    }
+
+    #[test]
+    fn test_parser_multi_array() {
+        let test_string = "*3\r\n$3\r\nSET\r\n$3\r\nfoo\r\n$3\r\n123\r\n*3\r\n$3\r\nSET\r\n$3\r\nbar\r\n$3\r\n456\r\n*3\r\n$3\r\nSET\r\n$3\r\nbaz\r\n$3\r\n789\r\n".to_string();
+        let res = parse_multi_array(test_string);
+        assert!(res.is_ok());
+
+        let res = res.unwrap();
+        assert_eq!(
+            res,
+            vec![
+                Value::Array(vec![
+                    Value::BulkString("SET".to_string()),
+                    Value::BulkString("foo".to_string()),
+                    Value::BulkString("123".to_string())
+                ]),
+                Value::Array(vec![
+                    Value::BulkString("SET".to_string()),
+                    Value::BulkString("bar".to_string()),
+                    Value::BulkString("456".to_string())
+                ]),
+                Value::Array(vec![
+                    Value::BulkString("SET".to_string()),
+                    Value::BulkString("baz".to_string()),
+                    Value::BulkString("789".to_string())
+                ])
+            ]
+        )
     }
 }

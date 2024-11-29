@@ -12,6 +12,7 @@ pub enum Phase {
     CheckSum,
 }
 
+#[derive(Debug)]
 pub struct RDBFile {
     pub rdb_version: String,
     pub aux_fields: Vec<(String, String)>,
@@ -34,14 +35,14 @@ pub enum ValueType {
     String(String),
 }
 
-pub fn read_rdb(f_path: String) -> Result<RDBFile, RusdisError> {
-    let f = File::open(f_path)?;
-    let mut reader = BufReader::new(f);
-
-    let mut buf = vec![];
-    let length = reader.read_to_end(&mut buf)?;
-
-    let mut iter = buf.into_iter().peekable();
+pub fn read_rdb(mut iter: Peekable<std::vec::IntoIter<u8>>) -> Result<RDBFile, RusdisError> {
+    //let f = File::open(f_path)?;
+    //let mut reader = BufReader::new(f);
+    //
+    //let mut buf = vec![];
+    //let length = reader.read_to_end(&mut buf)?;
+    //
+    //let mut iter = buf.into_iter().peekable();
     let mut phase = Phase::Header;
     let mut rdb_version = String::new();
     let mut aux_fields = vec![];

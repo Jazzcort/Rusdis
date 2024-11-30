@@ -24,19 +24,22 @@ pub fn parse_multi_array(protocol: String) -> Result<Vec<Value>, ParserError> {
     let mut first = true;
     let mut res_vec = vec![];
     let mut pre = 0;
+    let char_vec = protocol.chars().collect::<Vec<char>>();
 
-    for (idx, c) in protocol.chars().enumerate() {
-        if c == '*' {
+    for idx in 0..char_vec.len() {
+        if idx == char_vec.len() - 1 {
+            let slice = &char_vec[pre..];
+            res_vec.push(parse(slice.into_iter().collect::<String>())?)
+        }
+
+        if char_vec[idx] == '*' && char_vec[idx + 1].is_numeric() {
             if first {
                 first = false;
             } else {
-                res_vec.push(parse((&protocol[pre..idx]).to_string())?);
+                let slice = &char_vec[pre..idx];
+                res_vec.push(parse(slice.into_iter().collect::<String>())?);
                 pre = idx;
             }
-        }
-
-        if idx == protocol.len() - 1 {
-            res_vec.push(parse((&protocol[pre..]).to_string())?);
         }
     }
 
@@ -119,6 +122,9 @@ fn parse_bulk_string(s: String) -> Result<Value, ParserError> {
 }
 
 fn parse_array(protocol: String) -> Result<Value, ParserError> {
+    let x = protocol.clone();
+    let x_v = x.split("\r\n").collect::<Vec<&str>>();
+    dbg!(x_v);
     let mut protocol_iter = protocol.split("\r\n").into_iter();
 
     let first = protocol_iter.next();

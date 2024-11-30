@@ -42,6 +42,7 @@ pub fn parse_multi_array(protocol: String) -> Result<Vec<Value>, ParserError> {
             }
         }
     }
+    dbg!(&res_vec);
 
     Ok(res_vec)
 }

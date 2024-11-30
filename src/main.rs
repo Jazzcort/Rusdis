@@ -226,14 +226,15 @@ async fn connect_master(mut stream: TcpStream) -> Result<(), RusdisError> {
         .write_all(b"*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n")
         .await?;
     let mut buf = vec![];
-    reader.read_until('\n' as u8, &mut buf).await;
+    reader.read_until('\n' as u8, &mut buf).await?;
 
     let psync_response = parse(String::from_utf8_lossy(&buf).to_string())?;
     dbg!(&psync_response);
 
     buf.clear();
-    reader.read_until('\n' as u8, &mut buf).await;
+    reader.read_until('\n' as u8, &mut buf).await?;
     let idx = buf.iter().position(|&x| x == '\r' as u8);
+    dbg!(String::from_utf8_lossy(&buf));
     if idx.is_none() || buf.len() < 4 || buf[0] != ('$' as u8) {
         return Err(RusdisError::MasterConnectionError {
             msg: "Invalid RDB file format".to_string(),
@@ -243,9 +244,11 @@ async fn connect_master(mut stream: TcpStream) -> Result<(), RusdisError> {
     let idx = idx.unwrap();
     let length_str = String::from_utf8_lossy(&buf[1..idx]).to_string();
     let length = length_str.parse::<usize>()?;
+    dbg!(&length);
 
     let mut buf = vec![0_u8; length];
-    reader.read_exact(&mut buf).await;
+    reader.read_exact(&mut buf).await?;
+    dbg!(String::from_utf8_lossy(&buf));
     let rdb_file = read_rdb(buf.into_iter().peekable());
 
     tokio::spawn(async move {
@@ -284,6 +287,7 @@ async fn connect_master(mut stream: TcpStream) -> Result<(), RusdisError> {
 
                 let mut replication_info_write = REPLICATION_INFO.write().await;
                 replication_info_write.increment_offset(buf_length as u64);
+                dbg!(replication_info_write.get_master_repl_offset());
             }
         }
     });

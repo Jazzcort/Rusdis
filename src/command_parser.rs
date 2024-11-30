@@ -1,5 +1,8 @@
 use crate::{RusdisError, Value};
 use regex::Regex;
+
+const NOT_BULK_STRING: &'static str = "Not Bulk String in command";
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
     Set {
@@ -28,6 +31,8 @@ pub enum Command {
 pub enum ReplconfSubcommand {
     ListeningPort(u16),
     Capa(Vec<CapaOption>),
+    Getack(String),
+    Ack(u64),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -54,9 +59,6 @@ pub enum ConfigGetOption {
 
 pub fn parse_command(value_vec: Vec<Value>) -> Result<Command, RusdisError> {
     let mut value_iter = value_vec.into_iter();
-    //let mut string_vec = vec![];
-    //
-    //while let Some(s) = value_iter
 
     let command = value_iter.next();
     if command.is_none() {
@@ -110,7 +112,7 @@ fn parse_psync_command(mut iter: impl Iterator<Item = Value>) -> Result<Command,
                 })
             }
             _ => Err(RusdisError::CommandParserError {
-                msg: "Not Bulk String in command".to_string(),
+                msg: NOT_BULK_STRING.to_string(),
             }),
         },
         _ => Err(RusdisError::CommandParserError {
@@ -136,13 +138,54 @@ fn parse_replconf_command(mut iter: impl Iterator<Item = Value>) -> Result<Comma
                     iter,
                 )?)),
                 "CAPA" => Ok(Command::Replconf(parse_replconf_capa_command(iter)?)),
+                "GETACK" => Ok(Command::Replconf(parse_replconf_getack_command(iter)?)),
+                "ACK" => Ok(Command::Replconf(parse_replconf_ack_command(iter)?)),
                 _ => Err(RusdisError::CommandParserError {
                     msg: "Invalid REPLCONF subcommand".to_string(),
                 }),
             }
         }
         _ => Err(RusdisError::CommandParserError {
-            msg: "Not Bulk String in command".to_string(),
+            msg: NOT_BULK_STRING.to_string(),
+        }),
+    }
+}
+
+fn parse_replconf_ack_command(
+    mut iter: impl Iterator<Item = Value>,
+) -> Result<ReplconfSubcommand, RusdisError> {
+    match iter.next() {
+        Some(bulk_string) => {
+            if let Value::BulkString(s) = bulk_string {
+                let offset = s.parse::<u64>()?;
+                Ok(ReplconfSubcommand::Ack(offset))
+            } else {
+                Err(RusdisError::CommandParserError {
+                    msg: NOT_BULK_STRING.to_string(),
+                })
+            }
+        }
+        None => Err(RusdisError::CommandParserError {
+            msg: "No parameter in ACK subcommand".to_string(),
+        }),
+    }
+}
+
+fn parse_replconf_getack_command(
+    mut iter: impl Iterator<Item = Value>,
+) -> Result<ReplconfSubcommand, RusdisError> {
+    match iter.next() {
+        Some(bulk_string) => {
+            if let Value::BulkString(s) = bulk_string {
+                Ok(ReplconfSubcommand::Getack(s))
+            } else {
+                Err(RusdisError::CommandParserError {
+                    msg: NOT_BULK_STRING.to_string(),
+                })
+            }
+        }
+        None => Err(RusdisError::CommandParserError {
+            msg: "No parameter in GETACK subcommand".to_string(),
         }),
     }
 }
@@ -161,7 +204,7 @@ fn parse_replconf_capa_command(
             }
         } else {
             return Err(RusdisError::CommandParserError {
-                msg: "Not Bulk String in command".to_string(),
+                msg: NOT_BULK_STRING.to_string(),
             });
         }
     }
@@ -185,7 +228,7 @@ fn parse_replconf_listening_port_command(
                 Ok(ReplconfSubcommand::ListeningPort(port))
             } else {
                 Err(RusdisError::CommandParserError {
-                    msg: "Not Bulk String in command".to_string(),
+                    msg: NOT_BULK_STRING.to_string(),
                 })
             }
         }
@@ -209,7 +252,7 @@ fn parse_info_command(mut iter: impl Iterator<Item = Value>) -> Result<Command, 
             }
         } else {
             return Err(RusdisError::CommandParserError {
-                msg: "Not Bulk String in command".to_string(),
+                msg: NOT_BULK_STRING.to_string(),
             });
         }
     }
@@ -230,7 +273,7 @@ fn parse_incr_command(mut iter: impl Iterator<Item = Value>) -> Result<Command, 
         Ok(Command::Incr(key))
     } else {
         Err(RusdisError::CommandParserError {
-            msg: "Not Bulk String in command".to_string(),
+            msg: NOT_BULK_STRING.to_string(),
         })
     }
 }
@@ -258,7 +301,7 @@ fn parse_keys_command(mut iter: impl Iterator<Item = Value>) -> Result<Command, 
         Ok(Command::Keys(new_pattern))
     } else {
         Err(RusdisError::CommandParserError {
-            msg: "Not Bulk String in command".to_string(),
+            msg: NOT_BULK_STRING.to_string(),
         })
     }
 }
@@ -276,7 +319,7 @@ fn parse_config_command(mut iter: impl Iterator<Item = Value>) -> Result<Command
                 }
             } else {
                 Err(RusdisError::CommandParserError {
-                    msg: "Not Bulk String in command".to_string(),
+                    msg: NOT_BULK_STRING.to_string(),
                 })
             }
         }
@@ -302,7 +345,7 @@ fn parse_config_get_command(
                 }
             } else {
                 Err(RusdisError::CommandParserError {
-                    msg: "Not Bulk String in command".to_string(),
+                    msg: NOT_BULK_STRING.to_string(),
                 })
             }
         }
@@ -319,7 +362,7 @@ fn parse_get_command(mut iter: impl Iterator<Item = Value>) -> Result<Command, R
                 Ok(Command::Get(key))
             } else {
                 Err(RusdisError::CommandParserError {
-                    msg: "Not Bulk String in command".to_string(),
+                    msg: NOT_BULK_STRING.to_string(),
                 })
             }
         }
@@ -350,7 +393,7 @@ fn parse_set_command(mut iter: impl Iterator<Item = Value>) -> Result<Command, R
                                             px = Some(mil_sec);
                                         } else {
                                             return Err(RusdisError::CommandParserError {
-                                                msg: "Not Bulk String in command".to_string(),
+                                                msg: NOT_BULK_STRING.to_string(),
                                             });
                                         }
                                     }
@@ -365,7 +408,7 @@ fn parse_set_command(mut iter: impl Iterator<Item = Value>) -> Result<Command, R
                         }
                     } else {
                         return Err(RusdisError::CommandParserError {
-                            msg: "Not Bulk String in command".to_string(),
+                            msg: NOT_BULK_STRING.to_string(),
                         });
                     }
                 }
@@ -373,7 +416,7 @@ fn parse_set_command(mut iter: impl Iterator<Item = Value>) -> Result<Command, R
                 Ok(Command::Set { key, value, px })
             }
             _ => Err(RusdisError::CommandParserError {
-                msg: "Not Bulk String in command".to_string(),
+                msg: NOT_BULK_STRING.to_string(),
             }),
         },
         _ => Err(RusdisError::CommandParserError {
@@ -389,7 +432,7 @@ fn parse_echo_command(mut iter: impl Iterator<Item = Value>) -> Result<Command, 
                 Ok(Command::Echo(words))
             } else {
                 Err(RusdisError::CommandParserError {
-                    msg: "Not Bulk String in command".to_string(),
+                    msg: NOT_BULK_STRING.to_string(),
                 })
             }
         }

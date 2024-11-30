@@ -247,6 +247,7 @@ async fn connect_master(mut stream: TcpStream) -> Result<(), RusdisError> {
         loop {
             if let Ok(buf) = reader.fill_buf().await {
                 let buf = Vec::from(buf);
+                let buf_length = buf.len();
                 if buf.len() == 0 {
                     break;
                 }
@@ -265,6 +266,9 @@ async fn connect_master(mut stream: TcpStream) -> Result<(), RusdisError> {
                         }
                     }
                 }
+
+                let mut replication_info_write = REPLICATION_INFO.write().await;
+                replication_info_write.increment_offset(buf_length as u64);
             }
         }
     });
@@ -339,16 +343,18 @@ async fn handle_commands(mut stream: TcpStream, addr: String) -> Result<(), Rusd
                             return Ok(());
                         }
                     },
-                    Command::Replconf(subcommand) => match subcommand {
-                        ReplconfSubcommand::ListeningPort(port) => {
-                            // Store the replica's port
-                            writer.write_all(b"+OK\r\n").await;
-                        }
-                        ReplconfSubcommand::Capa(options) => {
-                            // Configure capa?
-                            writer.write_all(b"+OK\r\n").await;
-                        }
-                    },
+                    // Maybe can move this part to execuate_multi_commands
+                    //Command::Replconf(subcommand) => match subcommand {
+                    //    ReplconfSubcommand::ListeningPort(port) => {
+                    //        // Store the replica's port
+                    //        writer.write_all(b"+OK\r\n").await;
+                    //    }
+                    //    ReplconfSubcommand::Capa(options) => {
+                    //        // Configure capa?
+                    //        writer.write_all(b"+OK\r\n").await;
+                    //    }
+                    //    _ => {}
+                    //},
                     Command::Multi => {
                         is_multi = true;
                         writer.write_all(b"+OK\r\n").await;
@@ -607,16 +613,31 @@ async fn execute_multi_commands(commands: Vec<Command>, is_multi: bool) -> Strin
                 string = format!("${}\r\n", cnt) + string.as_str();
                 res += string.as_str();
             }
-            //Command::Replconf(subcommand) => match subcommand {
-            //    ReplconfSubcommand::ListeningPort(port) => {
-            //        // Store the replica's port
-            //        res += "+OK\r\n";
-            //    }
-            //    ReplconfSubcommand::Capa(options) => {
-            //        // Configure capa?
-            //        res += "+OK\r\n";
-            //    }
-            //},
+            Command::Replconf(subcommand) => match subcommand {
+                ReplconfSubcommand::ListeningPort(port) => {
+                    // Store the replica's port
+                    res += "+OK\r\n";
+                }
+                ReplconfSubcommand::Capa(options) => {
+                    // Configure capa?
+                    res += "+OK\r\n";
+                }
+                ReplconfSubcommand::Getack(_) => {
+                    let offset = REPLICATION_INFO
+                        .read()
+                        .await
+                        .get_master_repl_offset()
+                        .to_string();
+                    let ack_msg = format!(
+                        "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n${}\r\n{}\r\n",
+                        offset.len(),
+                        offset
+                    );
+
+                    res += ack_msg.as_str();
+                }
+                _ => {}
+            },
             _ => {
                 res += "-ERR not supported command";
             }

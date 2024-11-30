@@ -225,29 +225,21 @@ async fn connect_master(mut stream: TcpStream) -> Result<(), RusdisError> {
     writer
         .write_all(b"*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n")
         .await?;
-    let buf = Vec::from(reader.fill_buf().await?);
-    reader.consume(buf.len());
-    let response = String::from_utf8_lossy(&buf);
-    let response_vec = response.split("\r\n").collect::<Vec<&str>>();
+    let mut buf = vec![];
+    reader.read_until('\n' as u8, &mut buf).await;
 
-    let psync_response = parse(String::from(response_vec[0]) + "\r\n")?;
+    let psync_response = parse(String::from_utf8_lossy(&buf).to_string())?;
     dbg!(&psync_response);
 
-    if response_vec.len() >= 3 {
-        let file_buf = Vec::from(response_vec[2].as_bytes());
-        let rdb_file = read_rdb(file_buf.into_iter().peekable());
-        dbg!(&rdb_file);
-    } else {
-        let buf = Vec::from(reader.fill_buf().await?);
-        reader.consume(buf.len());
-        let idx = buf.iter().position(|&x| x == '\n' as u8);
-        if idx.is_some() {
-            let idx = idx.unwrap();
-            let file_buf = Vec::from(&buf[idx + 1..]);
+    let buf = Vec::from(reader.fill_buf().await?);
+    reader.consume(buf.len());
+    let idx = buf.iter().position(|&x| x == '\n' as u8);
+    if idx.is_some() {
+        let idx = idx.unwrap();
+        let file_buf = Vec::from(&buf[idx + 1..]);
 
-            let rdb_file = read_rdb(file_buf.into_iter().peekable());
-            dbg!(rdb_file);
-        }
+        let rdb_file = read_rdb(file_buf.into_iter().peekable());
+        dbg!(rdb_file);
     }
 
     tokio::spawn(async move {
@@ -271,7 +263,14 @@ async fn connect_master(mut stream: TcpStream) -> Result<(), RusdisError> {
                             let parse_res = parse_command(bulk_string_vec);
                             dbg!(&parse_res);
                             if let Ok(cmd) = parse_res {
-                                execute_multi_commands(vec![cmd], false).await;
+                                let reply_msg =
+                                    execute_multi_commands(vec![cmd.clone()], false).await;
+
+                                dbg!(&reply_msg);
+
+                                if let Command::Replconf(ReplconfSubcommand::Getack(_)) = cmd {
+                                    writer.write_all(reply_msg.as_bytes()).await;
+                                }
                             }
                         }
                     }
@@ -638,6 +637,7 @@ async fn execute_multi_commands(commands: Vec<Command>, is_multi: bool) -> Strin
                         .await
                         .get_master_repl_offset()
                         .to_string();
+                    dbg!(&offset);
                     let ack_msg = format!(
                         "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n${}\r\n{}\r\n",
                         offset.len(),

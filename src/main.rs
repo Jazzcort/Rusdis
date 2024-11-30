@@ -23,7 +23,7 @@ use std::io::prelude::*;
 use std::iter::Peekable;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::tcp::{ReadHalf, WriteHalf};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast::{channel, Sender};
@@ -231,16 +231,22 @@ async fn connect_master(mut stream: TcpStream) -> Result<(), RusdisError> {
     let psync_response = parse(String::from_utf8_lossy(&buf).to_string())?;
     dbg!(&psync_response);
 
-    let buf = Vec::from(reader.fill_buf().await?);
-    reader.consume(buf.len());
-    let idx = buf.iter().position(|&x| x == '\n' as u8);
-    if idx.is_some() {
-        let idx = idx.unwrap();
-        let file_buf = Vec::from(&buf[idx + 1..]);
-
-        let rdb_file = read_rdb(file_buf.into_iter().peekable());
-        dbg!(rdb_file);
+    buf.clear();
+    reader.read_until('\n' as u8, &mut buf).await;
+    let idx = buf.iter().position(|&x| x == '\r' as u8);
+    if idx.is_none() || buf.len() < 4 || buf[0] != ('$' as u8) {
+        return Err(RusdisError::MasterConnectionError {
+            msg: "Invalid RDB file format".to_string(),
+        });
     }
+
+    let idx = idx.unwrap();
+    let length_str = String::from_utf8_lossy(&buf[1..idx]).to_string();
+    let length = length_str.parse::<usize>()?;
+
+    let mut buf = vec![0_u8; length];
+    reader.read_exact(&mut buf).await;
+    let rdb_file = read_rdb(buf.into_iter().peekable());
 
     tokio::spawn(async move {
         let (reader, mut writer) = stream.split();

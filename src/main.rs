@@ -227,18 +227,27 @@ async fn connect_master(mut stream: TcpStream) -> Result<(), RusdisError> {
         .await?;
     let buf = Vec::from(reader.fill_buf().await?);
     reader.consume(buf.len());
-    let response = parse(String::from_utf8_lossy(&buf).to_string())?;
-    dbg!(response);
+    let response = String::from_utf8_lossy(&buf);
+    let response_vec = response.split("\r\n").collect::<Vec<&str>>();
 
-    let buf = Vec::from(reader.fill_buf().await?);
-    reader.consume(buf.len());
-    let idx = buf.iter().position(|&x| x == '\n' as u8);
-    if idx.is_some() {
-        let idx = idx.unwrap();
-        let file_buf = Vec::from(&buf[idx + 1..]);
+    let psync_response = parse(String::from(response_vec[0]) + "\r\n")?;
+    dbg!(&psync_response);
 
+    if response_vec.len() >= 3 {
+        let file_buf = Vec::from(response_vec[2].as_bytes());
         let rdb_file = read_rdb(file_buf.into_iter().peekable());
-        dbg!(rdb_file);
+        dbg!(&rdb_file);
+    } else {
+        let buf = Vec::from(reader.fill_buf().await?);
+        reader.consume(buf.len());
+        let idx = buf.iter().position(|&x| x == '\n' as u8);
+        if idx.is_some() {
+            let idx = idx.unwrap();
+            let file_buf = Vec::from(&buf[idx + 1..]);
+
+            let rdb_file = read_rdb(file_buf.into_iter().peekable());
+            dbg!(rdb_file);
+        }
     }
 
     tokio::spawn(async move {
@@ -260,6 +269,7 @@ async fn connect_master(mut stream: TcpStream) -> Result<(), RusdisError> {
                     for value in array_vec.into_iter() {
                         if let Value::Array(bulk_string_vec) = value {
                             let parse_res = parse_command(bulk_string_vec);
+                            dbg!(&parse_res);
                             if let Ok(cmd) = parse_res {
                                 execute_multi_commands(vec![cmd], false).await;
                             }

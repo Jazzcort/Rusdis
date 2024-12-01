@@ -234,7 +234,6 @@ async fn connect_master(mut stream: TcpStream) -> Result<(), RusdisError> {
     buf.clear();
     reader.read_until('\n' as u8, &mut buf).await?;
     let idx = buf.iter().position(|&x| x == '\r' as u8);
-    dbg!(String::from_utf8_lossy(&buf));
     if idx.is_none() || buf.len() < 4 || buf[0] != ('$' as u8) {
         return Err(RusdisError::MasterConnectionError {
             msg: "Invalid RDB file format".to_string(),
@@ -244,11 +243,9 @@ async fn connect_master(mut stream: TcpStream) -> Result<(), RusdisError> {
     let idx = idx.unwrap();
     let length_str = String::from_utf8_lossy(&buf[1..idx]).to_string();
     let length = length_str.parse::<usize>()?;
-    dbg!(&length);
 
     let mut buf = vec![0_u8; length];
     reader.read_exact(&mut buf).await?;
-    dbg!(String::from_utf8_lossy(&buf));
     let rdb_file = read_rdb(buf.into_iter().peekable());
 
     tokio::spawn(async move {
@@ -279,15 +276,27 @@ async fn connect_master(mut stream: TcpStream) -> Result<(), RusdisError> {
 
                                 if let Command::Replconf(ReplconfSubcommand::Getack(_)) = cmd {
                                     writer.write_all(reply_msg.as_bytes()).await;
+                                } else if let Command::Set { key, value, px } = cmd {
+                                    let mut buf_length = 4;
+                                    buf_length += key.len() + key.len().to_string().len() + 5;
+                                    buf_length += value.len() + value.len().to_string().len() + 5;
+                                    match px {
+                                        Some(millis) => {
+                                            buf_length += 8
+                                                + millis.to_string().len()
+                                                + millis.to_string().len().to_string().len()
+                                                + 5;
+                                        }
+                                        None => {}
+                                    }
+
+                                    let mut replication_info_write = REPLICATION_INFO.write().await;
+                                    replication_info_write.increment_offset(buf_length as u64);
                                 }
                             }
                         }
                     }
                 }
-
-                let mut replication_info_write = REPLICATION_INFO.write().await;
-                replication_info_write.increment_offset(buf_length as u64);
-                dbg!(replication_info_write.get_master_repl_offset());
             }
         }
     });

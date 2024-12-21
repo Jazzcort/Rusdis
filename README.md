@@ -19,7 +19,7 @@ Rusdis is a lightweight, high-performance, in-memory key-value store built from 
 
 ### Prerequisites
 
-- Rust (minimum version: 1.65.0)
+- Rust (minimum version: 1.77.0)
 
 ### Installation
 

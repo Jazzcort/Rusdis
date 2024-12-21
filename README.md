@@ -57,7 +57,7 @@ DEL key
 #### Configuration:
 
 - `port`: Port number for the server (default: `6379`)
-- - `dir`: Directory to store RDB file
+- `dir`: Directory to store RDB file
 - `dbfilename`: Name of the RDB filekj
 - `replicaof`: Master's port number to listen to
 

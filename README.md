@@ -58,7 +58,7 @@ DEL key
 
 - `port`: Port number for the server (default: `6379`)
 - `dir`: Directory to store RDB file
-- `dbfilename`: Name of the RDB filekj
+- `dbfilename`: Name of the RDB file
 - `replicaof`: Master's port number to listen to
 
 ```bash
